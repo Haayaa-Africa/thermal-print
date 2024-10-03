@@ -1,0 +1,10 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "paths": {
+      "thermal-print": ["../src/index"],
+      "thermal-print/*": ["../src/*"]
+    }
+  }
+}
