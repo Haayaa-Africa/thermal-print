@@ -23,7 +23,7 @@ public class ThermalPrintModule: Module {
       ])
     }
 
-    AsyncFunction("generateBytecodeAsync") { (base64String: String) -> [UInt8] in
+    AsyncFunction("generateBytecodeAsync") { (base64String: String) -> Data in
       // Step 1: Decode base64 string to UIImage
       guard let imageData = Data(base64Encoded: base64String),
             let image = UIImage(data: imageData) else {
@@ -31,9 +31,9 @@ public class ThermalPrintModule: Module {
       }
 
       // Step 2: Convert UIImage to black & white (1-bit image)
-    guard let bitmapData = self.convertTo1BitMonochrome(image: image) else {
-      throw NSError(domain: "ThermalPrintModule", code: 0, userInfo: [NSLocalizedDescriptionKey: "Failed to convert image to monochrome"])
-    }
+        guard let bitmapData = self.convertToEscPosFormat(image: image) else {
+          throw NSError(domain: "ThermalPrintModule", code: 0, userInfo: [NSLocalizedDescriptionKey: "Failed to convert image to monochrome"])
+        }
 
         return bitmapData
     }
@@ -84,5 +84,34 @@ public class ThermalPrintModule: Module {
       }
       
       return bitmapData
+    }
+
+    // Helper function to convert image to ESC/POS printable format
+    private func convertToEscPosFormat(image: UIImage) -> Data? {
+        guard let bitData = convertTo1BitMonochrome(image: image) else { return nil }
+        
+        let width = image.cgImage!.width
+        let height = image.cgImage!.height
+        let _bytesPerRow = (width + 7) / 8
+
+        // ESC/POS Command header for printing an image
+        var escPosData = Data()
+        let header: [UInt8] = [0x1D, 0x76, 0x30, 0x00]
+        
+        // Add header
+        escPosData.append(contentsOf: header)
+        
+        // Image width in bytes, width must be multiple of 8
+        escPosData.append(UInt8(width % 256))      // Width low byte
+        escPosData.append(UInt8(width / 256))      // Width high byte
+        
+        // Image height in pixels
+        escPosData.append(UInt8(height % 256))     // Height low byte
+        escPosData.append(UInt8(height / 256))     // Height high byte
+        
+        // Add the image bitmap data
+        escPosData.append(contentsOf: bitData)
+        
+        return escPosData
     }
 }
