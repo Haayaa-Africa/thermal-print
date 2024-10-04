@@ -2,46 +2,72 @@ package ng.haayaa.thermalprint
 
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Color
+import android.util.Base64
+//import java.io.ByteArrayOutputStream
 
 class ThermalPrintModule : Module() {
-  // Each module class must implement the definition function. The definition consists of components
-  // that describes the module's functionality and behavior.
-  // See https://docs.expo.dev/modules/module-api for more details about available components.
   override fun definition() = ModuleDefinition {
-    // Sets the name of the module that JavaScript code will use to refer to the module. Takes a string as an argument.
-    // Can be inferred from module's class name, but it's recommended to set it explicitly for clarity.
-    // The module will be accessible from `requireNativeModule('ThermalPrint')` in JavaScript.
     Name("ThermalPrint")
 
-    // Sets constant properties on the module. Can take a dictionary or a closure that returns a dictionary.
     Constants(
       "PI" to Math.PI
     )
 
-    // Defines event names that the module can send to JavaScript.
     Events("onChange")
+    Events("onGenerateBytecode")
 
-    // Defines a JavaScript synchronous function that runs the native code on the JavaScript thread.
     Function("hello") {
       "Hello world! 👋"
     }
 
-    // Defines a JavaScript function that always returns a Promise and whose native code
-    // is by default dispatched on the different thread than the JavaScript runtime runs on.
     AsyncFunction("setValueAsync") { value: String ->
-      // Send an event to JavaScript.
       sendEvent("onChange", mapOf(
         "value" to value
       ))
     }
 
-    // Enables the module to be used as a native view. Definition components that are accepted as part of
-    // the view definition: Prop, Events.
-    View(ThermalPrintView::class) {
-      // Defines a setter for the `name` prop.
-      Prop("name") { view: ThermalPrintView, prop: String ->
-        println(prop)
+    AsyncFunction("generateBytecodeAsync") { base64String: String ->
+      // Step 1: Decode base64 string to Bitmap
+      val decodedBytes = Base64.decode(base64String, Base64.DEFAULT)
+      val bitmap = BitmapFactory.decodeByteArray(decodedBytes, 0, decodedBytes.size)
+
+      // Step 2: Convert Bitmap to black & white (1-bit image)
+      val bitmapData = convertTo1BitMonochrome(bitmap)
+
+      bitmapData
+    }
+  }
+
+  /**
+   * Converts a Bitmap to a1-bit monochrome byte array.
+   *
+   * @param bitmap The input Bitmap.
+   * @return A byte array representing the 1-bit monochrome image. Each byte
+   *         represents a pixel and is either 0 or 255.
+   */
+  private fun convertTo1BitMonochrome(bitmap: Bitmap): ByteArray {
+    val width = bitmap.width
+    val height = bitmap.height
+    val bytesPerRow = (width + 7) / 8
+
+    val monochromeData = ByteArray(bytesPerRow * height)
+
+    for (y in 0 until height){
+      for (x in 0 until width) {
+        val pixel = bitmap.getPixel(x, y)
+        val r = Color.red(pixel)
+        val g = Color.green(pixel)
+        val b = Color.blue(pixel)
+        val grayscaleValue = (0.299 * r + 0.587 * g + 0.114 * b).toInt()
+
+        val byteIndex = y * bytesPerRow + (x / 8)
+        monochromeData[byteIndex] = if (grayscaleValue < 128) 0.toByte() else 255.toByte()
       }
     }
+
+    return monochromeData
   }
 }

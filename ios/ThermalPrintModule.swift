@@ -1,44 +1,88 @@
 import ExpoModulesCore
+import UIKit
 
 public class ThermalPrintModule: Module {
-  // Each module class must implement the definition function. The definition consists of components
-  // that describes the module's functionality and behavior.
-  // See https://docs.expo.dev/modules/module-api for more details about available components.
   public func definition() -> ModuleDefinition {
-    // Sets the name of the module that JavaScript code will use to refer to the module. Takes a string as an argument.
-    // Can be inferred from module's class name, but it's recommended to set it explicitly for clarity.
-    // The module will be accessible from `requireNativeModule('ThermalPrint')` in JavaScript.
     Name("ThermalPrint")
 
-    // Sets constant properties on the module. Can take a dictionary or a closure that returns a dictionary.
     Constants([
       "PI": Double.pi
     ])
 
-    // Defines event names that the module can send to JavaScript.
     Events("onChange")
+      
+    Events("onGenerateBytecode")
 
-    // Defines a JavaScript synchronous function that runs the native code on the JavaScript thread.
     Function("hello") {
       return "Hello world! 👋"
     }
 
-    // Defines a JavaScript function that always returns a Promise and whose native code
-    // is by default dispatched on the different thread than the JavaScript runtime runs on.
     AsyncFunction("setValueAsync") { (value: String) in
-      // Send an event to JavaScript.
       self.sendEvent("onChange", [
         "value": value
       ])
     }
 
-    // Enables the module to be used as a native view. Definition components that are accepted as part of the
-    // view definition: Prop, Events.
-    View(ThermalPrintView.self) {
-      // Defines a setter for the `name` prop.
-      Prop("name") { (view: ThermalPrintView, prop: String) in
-        print(prop)
+    AsyncFunction("generateBytecodeAsync") { (base64String: String) -> [UInt8] in
+      // Step 1: Decode base64 string to UIImage
+      guard let imageData = Data(base64Encoded: base64String),
+            let image = UIImage(data: imageData) else {
+        throw NSError(domain: "ThermalPrintModule", code: 0, userInfo: [NSLocalizedDescriptionKey: "Invalid base64 string"])
       }
+
+      // Step 2: Convert UIImage to black & white (1-bit image)
+    guard let bitmapData = self.convertTo1BitMonochrome(image: image) else {
+      throw NSError(domain: "ThermalPrintModule", code: 0, userInfo: [NSLocalizedDescriptionKey: "Failed to convert image to monochrome"])
+    }
+
+        return bitmapData
     }
   }
+
+    // Helper function to convert image to monochrome
+    // Helper function to convert image to 1-bit black and white
+    private func convertTo1BitMonochrome(image: UIImage) -> [UInt8]? {
+      guard let cgImage = image.cgImage else { return nil }
+      
+      let width = cgImage.width
+      let height = cgImage.height
+      let bytesPerRow = (width + 7) / 8 // Each byte contains 8 pixels
+
+      var bitmapData = [UInt8](repeating: 0, count: bytesPerRow * height)
+
+      // Convert to grayscale first
+      let colorSpace = CGColorSpaceCreateDeviceGray()
+      let context = CGContext(data: nil,
+                              width: width,
+                              height: height,
+                              bitsPerComponent: 8,
+                              bytesPerRow: width,
+                              space: colorSpace,
+                              bitmapInfo: CGImageAlphaInfo.none.rawValue)
+
+      context?.draw(cgImage, in: CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height)))
+      
+      guard let grayscaleImage = context?.makeImage() else { return nil }
+      
+      // Process the grayscale image into 1-bit data by thresholding
+      let pixelData = grayscaleImage.dataProvider?.data
+      let data = CFDataGetBytePtr(pixelData)
+      
+      for y in 0..<height {
+        for x in 0..<width {
+          let pixelIndex = y * width + x
+          let grayscaleValue = data![pixelIndex]
+          
+          // Threshold to convert to black or white
+          if grayscaleValue < 128 {
+            // Set pixel to black (1)
+            let byteIndex = (y * bytesPerRow) + (x / 8)
+            let bitIndex = 7 - (x % 8)
+            bitmapData[byteIndex] |= (1 << bitIndex)
+          }
+        }
+      }
+      
+      return bitmapData
+    }
 }
