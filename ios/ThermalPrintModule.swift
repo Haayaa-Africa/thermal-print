@@ -89,29 +89,35 @@ public class ThermalPrintModule: Module {
     // Helper function to convert image to ESC/POS printable format
     private func convertToEscPosFormat(image: UIImage) -> Data? {
         guard let bitData = convertTo1BitMonochrome(image: image) else { return nil }
-        
+
         let width = image.cgImage!.width
         let height = image.cgImage!.height
-        let _bytesPerRow = (width + 7) / 8
+        let bytesPerRow = (width + 7) / 8
 
-        // ESC/POS Command header for printing an image
         var escPosData = Data()
-        let header: [UInt8] = [0x1D, 0x76, 0x30, 0x00]
-        
-        // Add header
-        escPosData.append(contentsOf: header)
-        
-        // Image width in bytes, width must be multiple of 8
-        escPosData.append(UInt8(width % 256))      // Width low byte
-        escPosData.append(UInt8(width / 256))      // Width high byte
-        
-        // Image height in pixels
-        escPosData.append(UInt8(height % 256))     // Height low byte
-        escPosData.append(UInt8(height / 256))     // Height high byte
-        
-        // Add the image bitmap data
-        escPosData.append(contentsOf: bitData)
-        
+
+        // Process each line (row by row)
+        for y in 0..<height {
+            // ESC/POS Command header for each line
+            let header: [UInt8] = [0x1D, 0x76, 0x30, 0x00]
+            escPosData.append(contentsOf: header)
+
+            // Image width in bytes for the current row
+            escPosData.append(UInt8(width % 256))      // Width low byte
+            escPosData.append(UInt8(width / 256))      // Width high byte
+            
+            // Height is set to 1 pixel because we're sending it line by line
+            escPosData.append(UInt8(1))                // Height low byte (1 pixel)
+            escPosData.append(UInt8(0))                // Height high byte
+            
+            // Add the bitmap data for this row
+            let startByteIndex = y * bytesPerRow
+            let endByteIndex = startByteIndex + bytesPerRow
+            escPosData.append(contentsOf: bitData[startByteIndex..<endByteIndex])
+            
+            // No line feed here, as the printer moves to the next line automatically
+        }
+
         return escPosData
     }
 }
