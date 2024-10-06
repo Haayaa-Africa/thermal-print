@@ -6,12 +6,8 @@ import {
 
 // Import the native module. On web, it will be resolved to ThermalPrint.web.ts
 // and on native platforms to ThermalPrint.ts
-import {
-  ChangeEventPayload,
-  ThermalPrintViewProps,
-} from "./ThermalPrint.types";
+import { ChangeEventPayload } from "./ThermalPrint.types";
 import ThermalPrintModule from "./ThermalPrintModule";
-import ThermalPrintView from "./ThermalPrintView";
 
 // Get the native constant value.
 export const PI = ThermalPrintModule.PI;
@@ -24,8 +20,16 @@ export async function setValueAsync(value: string) {
   return await ThermalPrintModule.setValueAsync(value);
 }
 
-export async function generateBytecodeAsync(value: string) {
-  return await ThermalPrintModule.generateBytecodeAsync(value);
+export async function generateBytecodeAsync(
+  value: string,
+  printerWidth: number,
+  chunkSize: number
+) {
+  return await ThermalPrintModule.generateBytecodeAsync(
+    value,
+    printerWidth,
+    chunkSize
+  );
 }
 
 const emitter = new EventEmitter(
@@ -47,4 +51,4 @@ export function addGeneratedBytecodeListener(
   );
 }
 
-export { ThermalPrintView, ThermalPrintViewProps, ChangeEventPayload };
+export { ChangeEventPayload };

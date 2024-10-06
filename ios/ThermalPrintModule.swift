@@ -1,6 +1,19 @@
 import ExpoModulesCore
 import UIKit
 
+extension Array {
+    func chunked(into size: Int) -> [[Element]] {
+        var chunks = [[Element]]()
+        var currentIndex = startIndex
+        while currentIndex < endIndex {
+            let nextIndex = index(currentIndex, offsetBy: size, limitedBy: endIndex) ?? endIndex
+            chunks.append(Array(self[currentIndex..<nextIndex]))
+            currentIndex = nextIndex
+        }
+        return chunks
+    }
+}
+
 public class ThermalPrintModule: Module {
   public func definition() -> ModuleDefinition {
     Name("ThermalPrint")
@@ -23,101 +36,120 @@ public class ThermalPrintModule: Module {
       ])
     }
 
-    AsyncFunction("generateBytecodeAsync") { (base64String: String) -> Data in
-      // Step 1: Decode base64 string to UIImage
-      guard let imageData = Data(base64Encoded: base64String),
-            let image = UIImage(data: imageData) else {
-        throw NSError(domain: "ThermalPrintModule", code: 0, userInfo: [NSLocalizedDescriptionKey: "Invalid base64 string"])
-      }
-
-      // Step 2: Convert UIImage to black & white (1-bit image)
-        guard let bitmapData = self.convertToEscPosFormat(image: image) else {
-          throw NSError(domain: "ThermalPrintModule", code: 0, userInfo: [NSLocalizedDescriptionKey: "Failed to convert image to monochrome"])
-        }
+    AsyncFunction("generateBytecodeAsync") { (base64String: String, printerWidth: Int, chunkSize: Int) -> [[UInt8]] in
+        
+        let bitmapData = self.prepareImageForThermalPrinter(
+            base64ImageString:base64String,
+            printerWidth:printerWidth,
+            chunkSize:chunkSize
+        )
 
         return bitmapData
     }
+      
+      
   }
 
-    // Helper function to convert image to monochrome
-    // Helper function to convert image to 1-bit black and white
-    private func convertTo1BitMonochrome(image: UIImage) -> [UInt8]? {
-      guard let cgImage = image.cgImage else { return nil }
-      
-      let width = cgImage.width
-      let height = cgImage.height
-      let bytesPerRow = (width + 7) / 8 // Each byte contains 8 pixels
-
-      var bitmapData = [UInt8](repeating: 0, count: bytesPerRow * height)
-
-      // Convert to grayscale first
-      let colorSpace = CGColorSpaceCreateDeviceGray()
-      let context = CGContext(data: nil,
-                              width: width,
-                              height: height,
-                              bitsPerComponent: 8,
-                              bytesPerRow: width,
-                              space: colorSpace,
-                              bitmapInfo: CGImageAlphaInfo.none.rawValue)
-
-      context?.draw(cgImage, in: CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height)))
-      
-      guard let grayscaleImage = context?.makeImage() else { return nil }
-      
-      // Process the grayscale image into 1-bit data by thresholding
-      let pixelData = grayscaleImage.dataProvider?.data
-      let data = CFDataGetBytePtr(pixelData)
-      
-      for y in 0..<height {
-        for x in 0..<width {
-          let pixelIndex = y * width + x
-          let grayscaleValue = data![pixelIndex]
-          
-          // Threshold to convert to black or white
-          if grayscaleValue < 128 {
-            // Set pixel to black (1)
-            let byteIndex = (y * bytesPerRow) + (x / 8)
-            let bitIndex = 7 - (x % 8)
-            bitmapData[byteIndex] |= (1 << bitIndex)
-          }
-        }
-      }
-      
-      return bitmapData
-    }
-
-    // Helper function to convert image to ESC/POS printable format
-    private func convertToEscPosFormat(image: UIImage) -> Data? {
-        guard let bitData = convertTo1BitMonochrome(image: image) else { return nil }
-
-        let width = image.cgImage!.width
-        let height = image.cgImage!.height
+    func convertTo1BitMonochrome(bitmap: UIImage, maxWidth: Int) -> [UInt8] {
+        guard let cgImage = bitmap.cgImage else { return [] }
+        let width = cgImage.width
+        let height = cgImage.height
         let bytesPerRow = (width + 7) / 8
 
-        var escPosData = Data()
+        var monochromeData = [UInt8](repeating: 0, count: bytesPerRow * height)
 
-        // Process each line (row by row)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 4 * width, space: colorSpace, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        
+        context?.draw(cgImage, in: CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height)))
+        
+        guard let pixelBuffer = context?.data else { return [] }
+        let pixels = pixelBuffer.bindMemory(to: UInt8.self, capacity: width * height * 4)
+
         for y in 0..<height {
-            // ESC/POS Command header for each line
-            let header: [UInt8] = [0x1D, 0x76, 0x30, 0x00]
-            escPosData.append(contentsOf: header)
+            for x in 0..<width {
+                let offset = (y * width + x) * 4
+                let r = pixels[offset]
+                let g = pixels[offset + 1]
+                let b = pixels[offset + 2]
 
-            // Image width in bytes for the current row
-            escPosData.append(UInt8(width % 256))      // Width low byte
-            escPosData.append(UInt8(width / 256))      // Width high byte
-            
-            // Height is set to 1 pixel because we're sending it line by line
-            escPosData.append(UInt8(1))                // Height low byte (1 pixel)
-            escPosData.append(UInt8(0))                // Height high byte
-            
-            // Add the bitmap data for this row
-            let startByteIndex = y * bytesPerRow
-            let endByteIndex = startByteIndex + bytesPerRow
-            escPosData.append(contentsOf: bitData[startByteIndex..<endByteIndex])
-            
-            // No line feed here, as the printer moves to the next line automatically
+                // Convert to grayscale using the weighted average method
+                let grayscaleValue = Int(0.299 * Double(r) + 0.587 * Double(g) + 0.114 * Double(b))
+
+                // Set bit to 0 if pixel is dark, 1 if bright (inverted for printing)
+                if grayscaleValue < 128 {
+                    let byteIndex = y * bytesPerRow + (x / 8)
+                    monochromeData[byteIndex] |= (1 << (7 - (x % 8)))
+                }
+            }
         }
 
-        return escPosData
+        return monochromeData
+    }
+
+    func prepareImageForThermalPrinter(base64ImageString: String, printerWidth: Int, chunkSize: Int) -> [[UInt8]] {
+        // 1. Decode Base64 image
+        guard let decodedData = Data(base64Encoded: base64ImageString),
+              let decodedImage = UIImage(data: decodedData) else {
+            return []
+        }
+
+        // 2. Scale the bitmap if it exceeds the printer's width
+        let scaledImage: UIImage
+        if let cgImage = decodedImage.cgImage, cgImage.width > printerWidth {
+            let aspectRatio = CGFloat(cgImage.height) / CGFloat(cgImage.width)
+            let newHeight = Int(CGFloat(printerWidth) * aspectRatio)
+            let newSize = CGSize(width: printerWidth, height: newHeight)
+            UIGraphicsBeginImageContext(newSize)
+            decodedImage.draw(in: CGRect(origin: .zero, size: newSize))
+            scaledImage = UIGraphicsGetImageFromCurrentImageContext() ?? decodedImage
+            UIGraphicsEndImageContext()
+        } else {
+            scaledImage = decodedImage
+        }
+
+        // 3. Convert to 1-bit monochrome
+        let printerData = convertTo1BitMonochrome(bitmap: scaledImage, maxWidth: printerWidth)
+
+        // 4. Calculate bytes per line
+        let bytesPerLine = (printerWidth + 7) / 8
+
+        // 5. Create the image header (ESC/POS command)
+        var header = [UInt8](repeating: 0, count: 8)
+        header[0] = 0x1D // GS command
+        header[1] = 0x76 // 'v'
+        header[2] = 0x30 // '0'
+        header[3] = 0x00 // Normal mode (no scaling)
+
+        // Width of image in bytes (low byte, high byte)
+        header[4] = UInt8(bytesPerLine % 256) // Low byte of width
+        header[5] = UInt8(bytesPerLine / 256) // High byte of width
+
+        // Height of image in pixels (low byte, high byte)
+        header[6] = UInt8(scaledImage.size.height.truncatingRemainder(dividingBy: 256)) // Low byte of height
+        header[7] = UInt8(scaledImage.size.height / 256) // High byte of height
+
+        // 6. Split into lines (each line will be bytesPerLine wide)
+        var imageData = [[UInt8]]()
+        for y in stride(from: 0, to: printerData.count, by: bytesPerLine) {
+            let lineData = Array(printerData[y..<min(y + bytesPerLine, printerData.count)])
+            imageData.append(lineData)
+        }
+
+        // 7. Combine header and image data into larger chunks
+        var chunkedData = [[UInt8]]()
+        for chunk in imageData.chunked(into: chunkSize) {
+            let combinedChunk = chunk.reduce([UInt8]()) { acc, byteArray in
+                return acc + byteArray
+            }
+            chunkedData.append(combinedChunk)
+        }
+
+        // 8. Add header to the first chunk if necessary (you can decide if it’s for the first or all chunks)
+        var result = [[UInt8]]()
+        result.append(header) // Adding header to the first chunk
+        result.append(contentsOf: chunkedData)
+
+        return result
     }
 }
