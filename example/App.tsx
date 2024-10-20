@@ -168,8 +168,47 @@ export default function App() {
     return false;
   };
 
+  const printViaPrinter = async () => {
+    if (Platform.OS === "ios") {
+      return true;
+    }
+
+    const result = await captureRef(viewRef, {
+      result: "tmpfile",
+      quality: 1,
+      format: "png",
+    });
+
+    if (!result) {
+      return Alert.alert("Could not capture");
+    }
+
+    const manipulate = await ImageManipulator.manipulateAsync(
+      result,
+      [
+        {
+          resize: {
+            width: 576,
+          },
+        },
+      ],
+      {
+        base64: true,
+        format: ImageManipulator.SaveFormat.PNG,
+        compress: 1,
+      }
+    );
+
+    if (!manipulate.base64) {
+      return Alert.alert("Cannot Manipulate");
+    }
+
+    ThermalPrint.sendToUsbThermalPrinterAsync(manipulate.base64, 576, 5);
+  };
+
   return (
     <View style={styles.container}>
+      <Button title="Print with USB" onPress={printViaPrinter} />
       <Button title="Check Permission" onPress={checkPermission} />
       <Button title="Print something" onPress={printSomthing} />
 

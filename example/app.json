@@ -23,7 +23,8 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "ng.haayaa.thermalprint.example"
+      "package": "ng.haayaa.thermalprint.example",
+      "permissions": ["android.permission.USB_PERMISSION"]
     },
     "web": {
       "favicon": "./assets/favicon.png"

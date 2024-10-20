@@ -1,5 +1,7 @@
 package ng.haayaa.thermalprint
 
+import android.app.PendingIntent
+import android.hardware.usb.*
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import android.graphics.Bitmap
@@ -7,9 +9,18 @@ import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.util.Base64
 import kotlin.math.roundToInt
-//import java.io.ByteArrayOutputStream
+import android.content.Context
+import android.content.Intent
 
 class ThermalPrintModule : Module() {
+  private var printerConnection: UsbDeviceConnection? = null
+  private var printerInterface: UsbInterface? = null
+  private var endpoint: UsbEndpoint? = null
+
+  companion object {
+    const val USB_PERMISSION_ACTION = "ng.haayaa.thermalprint.USB_PERMISSION"
+  }
+
   override fun definition() = ModuleDefinition {
     Name("ThermalPrint")
 
@@ -36,9 +47,16 @@ class ThermalPrintModule : Module() {
 
       lines
     }
+
+    AsyncFunction("sendToUsbThermalPrinterAsync") { base64String: String, printerWidth: Int, chunkSize: Int ->
+
+      val lines = prepareImageForThermalPrinter(base64String, printerWidth, chunkSize)
+
+      connectToPrinter(lines);
+    }
   }
 
-  private fun convertTo1BitMonochrome(bitmap: Bitmap, maxWidth: Int): ByteArray {
+  private fun convertTo1BitMonochrome(bitmap: Bitmap): ByteArray {
     val width = bitmap.width
     val height = bitmap.height
     val bytesPerRow = (width + 7) / 8 // Number of bytes per row (8 pixels per byte)
@@ -66,6 +84,7 @@ class ThermalPrintModule : Module() {
 
     return monochromeData
   }
+
   private fun prepareImageForThermalPrinter(base64ImageString: String, printerWidth: Int, chunkSize: Int): List<ByteArray> {
     // 1. Decode Base64 image
     val decodedString: ByteArray = Base64.decode(base64ImageString, Base64.DEFAULT)
@@ -81,7 +100,7 @@ class ThermalPrintModule : Module() {
     }
 
     // 3. Convert to 1-bit monochrome
-    val printerData: ByteArray = convertTo1BitMonochrome(scaledBitmap, printerWidth)
+    val printerData: ByteArray = convertTo1BitMonochrome(scaledBitmap)
 
     // 4. Calculate bytes per line
     val bytesPerLine = (printerWidth + 7) / 8
@@ -124,4 +143,61 @@ class ThermalPrintModule : Module() {
     return result
   }
 
+  private fun connectToPrinter(bytecode: List<ByteArray>) {
+    val usbManager = appContext.reactContext?.getSystemService(Context.USB_SERVICE) as UsbManager
+    val deviceList = usbManager.deviceList
+    var printerDevice: UsbDevice? = null
+
+    // Automatically find the first suitable device (assuming only 1-2 devices are connected)
+    deviceList?.values?.forEach { device ->
+      val interfaceCount = device.interfaceCount
+
+      // Iterate over the interfaces to find one that supports bulk transfer (typical for printers)
+      for (i in 0 until interfaceCount) {
+        val usbInterface = device.getInterface(i)
+        for (j in 0 until usbInterface.endpointCount) {
+          val endpoint = usbInterface.getEndpoint(j)
+          if (endpoint.type == UsbConstants.USB_ENDPOINT_XFER_BULK &&
+            endpoint.direction == UsbConstants.USB_DIR_OUT) {
+            // Found a device that can support printing, store its reference
+            printerDevice = device
+            printerInterface = usbInterface
+            this.endpoint = endpoint
+            break
+          }
+        }
+      }
+      if (printerDevice != null) return@forEach // Exit the loop once the printer is found
+    }
+
+    if (printerDevice != null) {
+      // Check if we have permission to access the device
+      if (!usbManager.hasPermission(printerDevice)) {
+        // Request permission if not already granted
+        val permissionIntent = PendingIntent.getBroadcast(
+          appContext.reactContext,
+          0,
+          Intent(USB_PERMISSION_ACTION),
+          PendingIntent.FLAG_IMMUTABLE // Ensure compatibility with Android 12+
+        )
+        usbManager.requestPermission(printerDevice, permissionIntent)
+        return // Return here and wait for the permission callback
+      }
+
+      // Open a connection to the device
+      usbManager.openDevice(printerDevice)?.also { connection ->
+        if (connection.claimInterface(printerInterface, true)) {
+          printerConnection = connection
+          // Send data to the printer in chunks
+          bytecode.forEach { chunk ->
+            printerConnection?.bulkTransfer(endpoint, chunk, chunk.size, 1000) // 1000 ms timeout
+          }
+        } else {
+          connection.close()
+        }
+      } ?: throw Exception("Unable to open connection to the printer.")
+    } else {
+      throw Exception("No compatible printer found.")
+    }
   }
+}

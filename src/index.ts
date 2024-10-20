@@ -32,6 +32,18 @@ export async function generateBytecodeAsync(
   );
 }
 
+export async function sendToUsbThermalPrinterAsync(
+  value: string,
+  printerWidth: number,
+  chunkSize: number
+) {
+  return await ThermalPrintModule.sendToUsbThermalPrinterAsync(
+    value,
+    printerWidth,
+    chunkSize
+  );
+}
+
 const emitter = new EventEmitter(
   ThermalPrintModule ?? NativeModulesProxy.ThermalPrint
 );
