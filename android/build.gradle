@@ -41,3 +41,7 @@ android {
     abortOnError false
   }
 }
+
+dependencies {
+    implementation project(':react-native-ble-plx')
+}

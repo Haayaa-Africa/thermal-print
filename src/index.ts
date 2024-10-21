@@ -44,6 +44,24 @@ export async function sendToUsbThermalPrinterAsync(
   );
 }
 
+export async function sendToBluetoothThermalPrinterAsync(
+  value: string,
+  printerWidth: number,
+  chunkSize: number,
+  deviceMac: string,
+  serviceUUID: string,
+  characteristicUUID: string
+) {
+  return await ThermalPrintModule.sendToBluetoothThermalPrinterAsync(
+    value,
+    printerWidth,
+    chunkSize,
+    deviceMac,
+    serviceUUID,
+    characteristicUUID
+  );
+}
+
 const emitter = new EventEmitter(
   ThermalPrintModule ?? NativeModulesProxy.ThermalPrint
 );
