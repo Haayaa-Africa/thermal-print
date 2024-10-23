@@ -1,15 +1,6 @@
 package ng.haayaa.thermalprint
 
-import android.Manifest
-import android.annotation.SuppressLint
 import android.app.PendingIntent
-import android.bluetooth.BluetoothAdapter
-import android.bluetooth.BluetoothDevice
-import android.bluetooth.BluetoothGatt
-import android.bluetooth.BluetoothGattCallback
-import android.bluetooth.BluetoothGattCharacteristic
-import android.bluetooth.BluetoothManager
-import android.bluetooth.BluetoothProfile
 import android.hardware.usb.*
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -20,15 +11,7 @@ import android.util.Base64
 import kotlin.math.roundToInt
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
-import androidx.core.app.ActivityCompat
-import expo.modules.kotlin.AppContext
-import java.util.LinkedList
-import java.util.Queue
-import java.util.UUID
 
 class ThermalPrintModule : Module() {
   private var printerConnection: UsbDeviceConnection? = null
@@ -59,11 +42,20 @@ class ThermalPrintModule : Module() {
       ))
     }
 
-    AsyncFunction("generateBytecodeAsync") { base64String: String, printerWidth: Int, chunkSize: Int ->
+    AsyncFunction("generateBytecodeAsync") { base64String: String, printerWidth: Int, mtuSize: Int ->
 
-      val lines = prepareImageForThermalPrinter(base64String, printerWidth, chunkSize)
+      val lines = prepareImageForThermalPrinter(base64String, printerWidth, mtuSize)
 
       lines
+    }
+
+    AsyncFunction("generateBytecodeBase64Async") { base64String: String, printerWidth: Int, mtuSize: Int ->
+
+      val lines = prepareImageForThermalPrinter(base64String, printerWidth, mtuSize)
+
+      val base64Lines = prepareImageForBase64ThermalPrinter(lines)
+
+      base64Lines
     }
 
     AsyncFunction("sendToUsbThermalPrinterAsync") { base64String: String, printerWidth: Int, chunkSize: Int ->
@@ -108,7 +100,7 @@ class ThermalPrintModule : Module() {
     return monochromeData
   }
 
-  private fun prepareImageForThermalPrinter(base64ImageString: String, printerWidth: Int, chunkSize: Int): List<ByteArray> {
+  private fun prepareImageForThermalPrinter(base64ImageString: String, printerWidth: Int, mtuSize: Int): List<ByteArray> {
     // 1. Decode Base64 image
     val decodedString: ByteArray = Base64.decode(base64ImageString, Base64.DEFAULT)
     val decodedBitmap: Bitmap = BitmapFactory.decodeByteArray(decodedString, 0, decodedString.size)
@@ -149,21 +141,42 @@ class ThermalPrintModule : Module() {
       .map { it.toByteArray() }
       .toList()
 
-    // 7. Combine header and image data into larger chunks
-    val chunkedData = imageData.chunked(chunkSize).map { chunk ->
-      // Create a larger byte array to hold the combined data
-      val combinedChunk = chunk.fold(ByteArray(0)) { acc, byteArray ->
-        acc + byteArray // Concatenate the byte arrays
+    // 7. Combine header and image data into chunks based on MTU size
+    val chunkedData = mutableListOf<ByteArray>()
+    var currentChunk = mutableListOf<Byte>()
+    var remainingMtu = mtuSize
+
+    // Add header as the first chunk
+    currentChunk.addAll(header.asList())
+    remainingMtu -= header.size
+
+    for (line in imageData) {
+      if (line.size <= remainingMtu) {
+        currentChunk.addAll(line.asList())
+        remainingMtu -= line.size
+      } else {
+        // Add the current chunk and start a new one
+        chunkedData.add(currentChunk.toByteArray())
+        currentChunk = mutableListOf<Byte>()
+        currentChunk.addAll(line.asList())
+        remainingMtu = mtuSize - line.size
       }
-      combinedChunk
     }
 
-    // 8. Add header to the first chunk if necessary (you can decide if it’s for the first or all chunks)
-    val result = mutableListOf<ByteArray>()
-    result.add(header) // Adding header to the first chunk
-    result.addAll(chunkedData)
+    // Add the last chunk if any
+    if (currentChunk.isNotEmpty()) {
+      chunkedData.add(currentChunk.toByteArray())
+    }
 
-    return result
+    return chunkedData
+  }
+
+  private fun prepareImageForBase64ThermalPrinter(lines: List<ByteArray>): List<String>{
+    val base64Lines = lines.map { chunk ->
+      Base64.encodeToString(chunk, Base64.DEFAULT)
+    }
+
+    return  base64Lines
   }
 
   private fun prepareImageForUsbThermalPrinter(base64ImageString: String, printerWidth: Int, maxChunkHeight: Int): List<ByteArray> {

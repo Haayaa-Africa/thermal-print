@@ -31,6 +31,17 @@ export async function generateBytecodeAsync(
     chunkSize
   );
 }
+export async function generateBytecodeBase64Async(
+  value: string,
+  printerWidth: number,
+  chunkSize: number
+) {
+  return await ThermalPrintModule.generateBytecodeBase64Async(
+    value,
+    printerWidth,
+    chunkSize
+  );
+}
 
 export async function sendToUsbThermalPrinterAsync(
   value: string,

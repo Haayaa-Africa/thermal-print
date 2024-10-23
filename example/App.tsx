@@ -24,15 +24,15 @@ export default function App() {
   const viewRef = useRef<View>();
   const [selectedDevice, setSelectedDevice] = useState<Device>();
 
-  // React.useEffect(() => {
-  //   const subscription = manager.onStateChange((state) => {
-  //     if (state === "PoweredOn") {
-  //       scanAndConnect();
-  //       subscription.remove();
-  //     }
-  //   }, true);
-  //   return () => subscription.remove();
-  // }, [manager]);
+  React.useEffect(() => {
+    const subscription = manager.onStateChange((state) => {
+      if (state === "PoweredOn") {
+        scanAndConnect();
+        subscription.remove();
+      }
+    }, true);
+    return () => subscription.remove();
+  }, [manager]);
 
   function scanAndConnect() {
     manager.startDeviceScan(null, null, (error, device) => {
@@ -52,11 +52,11 @@ export default function App() {
   }
 
   const printSomthing = async () => {
-    // if (!selectedDevice) {
-    //   Alert.alert("Select A device");
+    if (!selectedDevice) {
+      Alert.alert("Select A device");
 
-    //   return;
-    // }
+      return;
+    }
 
     const result = await captureRef(viewRef, {
       result: "tmpfile",
@@ -87,35 +87,28 @@ export default function App() {
       return Alert.alert("Cannot Manipulate");
     }
 
-    const [deviceID, serviceUUID, uuid] = [
-      "86:67:7A:26:C0:A3",
-      "00001800-0000-1000-8000-00805f9b34fb",
-      "00002a00-0000-1000-8000-00805f9b34fb",
-    ];
-
-    ThermalPrint.sendToBluetoothThermalPrinterAsync(
-      manipulate.base64,
-      384,
-      5,
-      deviceID,
-      serviceUUID,
-      uuid
-    );
-
-    return;
-
-    const toPrint = await ThermalPrint.generateBytecodeAsync(
-      manipulate.base64,
-      384,
-      5
-    );
-
     selectedDevice
-      .connect()
+      .connect({
+        requestMTU: 512,
+      })
       .then((device) => {
         return device.discoverAllServicesAndCharacteristics();
       })
       .then(async (device) => {
+        if (!manipulate.base64) {
+          return Alert.alert("Cannot Manipulate");
+        }
+
+        console.log("MTU", device.mtu);
+
+        const toPrint = (await ThermalPrint.generateBytecodeBase64Async(
+          manipulate.base64,
+          384,
+          device.mtu
+        )) as string[];
+
+        console.log("Length", toPrint.length);
+
         const services = await device.services();
         let correctCharacteristic = null;
 
@@ -133,25 +126,8 @@ export default function App() {
         }
 
         if (correctCharacteristic && manipulate.base64) {
-          // for (const line of toPrint) {
-          //   const response = await correctCharacteristic.writeWithResponse(
-          //     Buffer.from(line).toString("base64")
-          //   );
-          // }
-
-          console.log([
-            correctCharacteristic.deviceID,
-            correctCharacteristic.serviceUUID,
-            correctCharacteristic.uuid,
-          ]);
-          console.log(correctCharacteristic);
-          ThermalPrint.sendToBluetoothThermalPrinterAsync(
-            manipulate.base64,
-            384,
-            5,
-            correctCharacteristic.deviceID,
-            correctCharacteristic.serviceUUID,
-            correctCharacteristic.uuid
+          await Promise.all(
+            toPrint.map((line) => correctCharacteristic.writeWithResponse(line))
           );
         }
       })
