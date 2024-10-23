@@ -12,19 +12,11 @@ import ThermalPrintModule from "./ThermalPrintModule";
 // Get the native constant value.
 export const PI = ThermalPrintModule.PI;
 
-export function hello(): string {
-  return ThermalPrintModule.hello();
-}
-
-export async function setValueAsync(value: string) {
-  return await ThermalPrintModule.setValueAsync(value);
-}
-
 export async function generateBytecodeAsync(
   value: string,
   printerWidth: number,
   chunkSize: number
-) {
+): Promise<Uint8Array[]> {
   return await ThermalPrintModule.generateBytecodeAsync(
     value,
     printerWidth,
@@ -35,19 +27,19 @@ export async function generateBytecodeBase64Async(
   value: string,
   printerWidth: number,
   chunkSize: number
-) {
-  return await ThermalPrintModule.generateBytecodeBase64Async(
+): Promise<string[]> {
+  return (await ThermalPrintModule.generateBytecodeBase64Async(
     value,
     printerWidth,
     chunkSize
-  );
+  )) as string[];
 }
 
 export async function sendToUsbThermalPrinterAsync(
   value: string,
   printerWidth: number,
   chunkSize: number
-) {
+): Promise<void> {
   return await ThermalPrintModule.sendToUsbThermalPrinterAsync(
     value,
     printerWidth,

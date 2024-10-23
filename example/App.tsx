@@ -101,11 +101,11 @@ export default function App() {
 
         console.log("MTU", device.mtu);
 
-        const toPrint = (await ThermalPrint.generateBytecodeBase64Async(
+        const toPrint = await ThermalPrint.generateBytecodeBase64Async(
           manipulate.base64,
           384,
           device.mtu
-        )) as string[];
+        );
 
         console.log("Length", toPrint.length);
 
@@ -125,7 +125,7 @@ export default function App() {
           }
         }
 
-        if (correctCharacteristic && manipulate.base64) {
+        if (correctCharacteristic && toPrint.length) {
           await Promise.all(
             toPrint.map((line) => correctCharacteristic.writeWithResponse(line))
           );
