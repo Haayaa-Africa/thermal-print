@@ -64,7 +64,7 @@ class ThermalPrintModule : Module() {
 
     AsyncFunction("sendToUsbThermalPrinterAsync") { base64String: String, printerWidth: Int, chunkSize: Int ->
 
-      val lines = prepareImageForThermalPrinter(base64String, printerWidth, chunkSize)
+      val lines = prepareImageForUsbThermalPrinter(base64String, printerWidth, chunkSize)
 
       connectToPrinter(lines);
     }
@@ -165,6 +165,66 @@ class ThermalPrintModule : Module() {
     return result
   }
 
+  private fun prepareImageForUsbThermalPrinter(base64ImageString: String, printerWidth: Int, maxChunkHeight: Int): List<ByteArray> {
+    // 1. Decode Base64 image
+    val decodedString: ByteArray = Base64.decode(base64ImageString, Base64.DEFAULT)
+    val decodedBitmap: Bitmap = BitmapFactory.decodeByteArray(decodedString, 0, decodedString.size)
+
+    // 2. Scale the bitmap if it exceeds the printer's width
+    val scaledBitmap = if (decodedBitmap.width > printerWidth) {
+      val aspectRatio = decodedBitmap.height.toFloat() / decodedBitmap.width
+      val newHeight = (printerWidth * aspectRatio).roundToInt()
+      Bitmap.createScaledBitmap(decodedBitmap, printerWidth, newHeight, true)
+    } else {
+      decodedBitmap
+    }
+
+    // 3. Convert to 1-bit monochrome
+    val printerData: ByteArray = convertTo1BitMonochrome(scaledBitmap)
+
+    // 4. Calculate bytes per line
+    val bytesPerLine = (printerWidth + 7) / 8
+
+    // 5. Create the image header (ESC/POS command)
+    val header = ByteArray(8)
+    header[0] = 0x1D // GS command
+    header[1] = 0x76 // 'v'
+    header[2] = 0x30 // '0'
+    header[3] = 0x00 // Normal mode (no scaling)
+
+    // Width of image in bytes (low byte, high byte)
+    header[4] = (bytesPerLine % 256).toByte() // Low byte of width
+    header[5] = (bytesPerLine / 256).toByte() // High byte of width
+
+    // Prepare the final list of byte arrays, split by height
+    val byteArrayChunks = mutableListOf<ByteArray>()
+
+    // 6. Split the bitmap into rows of `maxChunkHeight`
+    var currentY = 0
+    while (currentY < scaledBitmap.height) {
+      // Get the actual height for this chunk
+      val chunkHeight = minOf(maxChunkHeight, scaledBitmap.height - currentY)
+
+      // Create the bitmap chunk
+      val bitmapChunk = Bitmap.createBitmap(scaledBitmap, 0, currentY, scaledBitmap.width, chunkHeight)
+
+      // Convert the chunk to 1-bit monochrome
+      val chunkData = convertTo1BitMonochrome(bitmapChunk)
+
+      // 7. Update the header for the chunk
+      header[6] = (chunkHeight % 256).toByte() // Low byte of height
+      header[7] = (chunkHeight / 256).toByte() // High byte of height
+
+      // Add the header and chunk data to the list
+      byteArrayChunks.add(header + chunkData)
+
+      // Move to the next chunk
+      currentY += chunkHeight
+    }
+
+    return byteArrayChunks
+  }
+
   private fun connectToPrinter(bytecode: List<ByteArray>) {
     val usbManager = appContext.reactContext?.getSystemService(Context.USB_SERVICE) as UsbManager
     val deviceList = usbManager.deviceList
@@ -210,16 +270,39 @@ class ThermalPrintModule : Module() {
       usbManager.openDevice(printerDevice)?.also { connection ->
         if (connection.claimInterface(printerInterface, true)) {
           printerConnection = connection
-          // Send data to the printer in chunks
-          bytecode.forEach { chunk ->
-            printerConnection?.bulkTransfer(endpoint, chunk, chunk.size, 1000) // 1000 ms timeout
-          }
+          // Send data to the printer with a delay between chunks
+          sendDataToPrinterWithDelay(bytecode)
         } else {
           connection.close()
         }
       } ?: throw Exception("Unable to open connection to the printer.")
     } else {
       throw Exception("No compatible printer found.")
+    }
+  }
+
+  private fun sendDataToPrinterWithDelay(bytecode: List<ByteArray>) {
+    val maxChunkSize = 1024 // Use a smaller chunk size (e.g., 1024 bytes)
+    val timeout = 5000 // Timeout for larger data transfers
+
+    bytecode.forEach { chunk ->
+      // Send each chunk and then wait before sending the next chunk
+      val result = printerConnection?.bulkTransfer(endpoint, chunk, chunk.size, timeout)
+
+      // Log the result of each transfer
+      Log.d("ThermalPrint", "bulkTransfer result: $result for chunk size: ${chunk.size}")
+
+      if (result == null || result < 0) {
+        Log.e("ThermalPrint", "Failed to transfer data to printer, result: $result")
+        throw Exception("Failed to transfer data to the printer")
+      }
+
+      // Add a small delay to give the printer time to process the data
+      try {
+        Thread.sleep(1) // Delay for 500 milliseconds (can adjust this delay)
+      } catch (e: InterruptedException) {
+        Log.e("ThermalPrint", "Thread was interrupted", e)
+      }
     }
   }
 

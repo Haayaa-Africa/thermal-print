@@ -10,6 +10,7 @@ import {
   StyleSheet,
   Text,
   View,
+  Image,
 } from "react-native";
 import { BleManager, Device, Service } from "react-native-ble-plx";
 import { captureRef } from "react-native-view-shot";
@@ -201,6 +202,8 @@ export default function App() {
   };
 
   const printViaPrinter = async () => {
+    console.log("HHHH");
+
     if (Platform.OS === "ios") {
       return true;
     }
@@ -214,6 +217,8 @@ export default function App() {
     if (!result) {
       return Alert.alert("Could not capture");
     }
+
+    console.log(result);
 
     const manipulate = await ImageManipulator.manipulateAsync(
       result,
@@ -249,14 +254,20 @@ export default function App() {
           width: 300,
           justifyContent: "center",
           borderWidth: 3,
-          minHeight: 100,
+          minHeight: 500,
           borderColor: "black",
           alignItems: "center",
           backgroundColor: "white",
         }}
         ref={viewRef}
       >
-        <Text>This is actually very nice</Text>
+        <Image
+          source={require("./assets/receipt.jpg")}
+          style={{
+            flex: 1,
+          }}
+          resizeMode="contain"
+        />
       </View>
     </View>
   );
