@@ -83,7 +83,6 @@ export default function App() {
         compress: 1,
       }
     );
-
     if (!manipulate.base64) {
       return Alert.alert("Cannot Manipulate");
     }
@@ -218,8 +217,6 @@ export default function App() {
       return Alert.alert("Could not capture");
     }
 
-    console.log(result);
-
     const manipulate = await ImageManipulator.manipulateAsync(
       result,
       [
@@ -247,7 +244,7 @@ export default function App() {
     <View style={styles.container}>
       <Button title="Print with USB" onPress={printViaPrinter} />
       <Button title="Check Permission" onPress={checkPermission} />
-      <Button title="Print something" onPress={printSomthing} />
+      <Button title="Print with Bluetootha" onPress={printSomthing} />
 
       <View
         style={{

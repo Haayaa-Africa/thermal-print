@@ -1,5 +1,6 @@
 package ng.haayaa.thermalprint
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.PendingIntent
 import android.bluetooth.BluetoothAdapter
@@ -7,6 +8,7 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
+import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.hardware.usb.*
 import expo.modules.kotlin.modules.Module
@@ -18,9 +20,11 @@ import android.util.Base64
 import kotlin.math.roundToInt
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import androidx.core.app.ActivityCompat
 import expo.modules.kotlin.AppContext
 import java.util.LinkedList
 import java.util.Queue
@@ -72,9 +76,6 @@ class ThermalPrintModule : Module() {
     AsyncFunction("sendToBluetoothThermalPrinterAsync") { base64String: String, printerWidth: Int, chunkSize: Int,  deviceMac: String, serviceUUID: String, characteristicUUID: String ->
 
       val lines = prepareImageForThermalPrinter(base64String, printerWidth, chunkSize)
-
-      printWithBluetooth(
-        appContext,lines, deviceMac, serviceUUID, characteristicUUID)
     }
   }
 
@@ -303,107 +304,6 @@ class ThermalPrintModule : Module() {
       } catch (e: InterruptedException) {
         Log.e("ThermalPrint", "Thread was interrupted", e)
       }
-    }
-  }
-
-  @SuppressLint("MissingPermission")
-  private fun printWithBluetooth(
-    context: AppContext,
-    lines: List<ByteArray>,
-    deviceMac: String,
-    serviceUUID: String,
-    characteristicUUID: String
-  ) {
-    // Initialize Bluetooth adapter
-    val bluetoothAdapter: BluetoothAdapter? = BluetoothAdapter.getDefaultAdapter()
-    if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled) {
-      throw Exception("Bluetooth is disabled or not supported on this device")
-    }
-
-    // Get the Bluetooth device using the provided MAC address
-    val bluetoothDevice: BluetoothDevice = bluetoothAdapter.getRemoteDevice(deviceMac)
-      ?: throw Exception("Unable to find the Bluetooth device with MAC: $deviceMac")
-
-    // Queue to manage the data writes
-    val writeQueue: Queue<ByteArray> = LinkedList(lines)
-
-    // Retry logic variables
-    var connectionAttempts = 0
-    val maxAttempts = 3
-
-    // BluetoothGattCallback with retry logic
-    val bluetoothGattCallback = object : BluetoothGattCallback() {
-      override fun onConnectionStateChange(gatt: BluetoothGatt?, status: Int, newState: Int) {
-        Log.d("ThermalPrint Log", "Connection State Change: Status = $status, NewState = $newState")
-        if (status == BluetoothGatt.GATT_SUCCESS && newState == BluetoothProfile.STATE_CONNECTED) {
-          Log.d("ThermalPrint Log", "Connected to device, discovering services...")
-          gatt?.discoverServices()
-        } else if (status == 133 || newState == BluetoothProfile.STATE_DISCONNECTED) {
-          Log.d("ThermalPrint Log", "Disconnected from device.")
-
-          // Retry connection if it's a GATT_ERROR 133 or a disconnection
-          if (connectionAttempts < maxAttempts) {
-            connectionAttempts++
-            Log.d("ThermalPrint Log", "Retrying connection attempt $connectionAttempts/$maxAttempts...")
-            val handler = Handler(Looper.getMainLooper())
-            handler.postDelayed({
-              gatt?.connect()
-            }, 2000) // 2-second delay before retrying
-          } else {
-            Log.e("ThermalPrint Log", "Max connection attempts reached. Closing connection.")
-            gatt?.close()
-          }
-        } else {
-          Log.e("ThermalPrint Log", "Connection failed with status: $status")
-          gatt?.close()
-        }
-      }
-
-      override fun onServicesDiscovered(gatt: BluetoothGatt?, status: Int) {
-        if (status == BluetoothGatt.GATT_SUCCESS) {
-          val service = gatt?.getService(UUID.fromString(serviceUUID))
-          val characteristic = service?.getCharacteristic(UUID.fromString(characteristicUUID))
-
-          if (characteristic == null) {
-            throw Exception("Characteristic not found")
-          }
-
-          Log.d("ThermalPrint", "Writing data to the printer...")
-          writeNextCharacteristic(gatt, characteristic, writeQueue)
-        }
-      }
-
-      override fun onCharacteristicWrite(gatt: BluetoothGatt?, characteristic: BluetoothGattCharacteristic?, status: Int) {
-        if (status == BluetoothGatt.GATT_SUCCESS) {
-          writeNextCharacteristic(gatt, characteristic, writeQueue)
-        } else {
-          Log.e("ThermalPrint", "Failed to write characteristic with status: $status")
-        }
-      }
-    }
-
-    // Initiate connection to the Bluetooth device
-    val bluetoothGatt = bluetoothDevice.connectGatt(context.reactContext, false, bluetoothGattCallback)
-
-    bluetoothGatt?.let {
-      if (!it.connect()) {
-        Log.d("ThermalPrint Log", "Retrying initial connection...")
-        it.disconnect()
-        it.connect()
-      }
-    } ?: throw Exception("Failed to connect to the printer")
-  }
-
-  // Helper function to write the next byte array from the queue
-  @SuppressLint("MissingPermission")
-  private fun writeNextCharacteristic(
-    gatt: BluetoothGatt?,
-    characteristic: BluetoothGattCharacteristic?,
-    writeQueue: Queue<ByteArray>
-  ) {
-    if (writeQueue.isNotEmpty() && characteristic != null) {
-      characteristic.value = writeQueue.poll()
-      gatt?.writeCharacteristic(characteristic)
     }
   }
 }
