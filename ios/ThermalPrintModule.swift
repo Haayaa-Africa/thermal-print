@@ -35,17 +35,30 @@ public class ThermalPrintModule: Module {
         "value": value
       ])
     }
+      
+      AsyncFunction("generateBytecodeAsync") { (base64String: String, printerWidth: Int, mtuSize: Int) -> [[UInt8]] in
+          
+          let bitmapData = self.prepareImageForThermalPrinter(
+              base64ImageString:base64String,
+              printerWidth:printerWidth,
+              mtuSize:mtuSize
+          )
 
-    AsyncFunction("generateBytecodeAsync") { (base64String: String, printerWidth: Int, chunkSize: Int) -> [[UInt8]] in
-        
-        let bitmapData = self.prepareImageForThermalPrinter(
-            base64ImageString:base64String,
-            printerWidth:printerWidth,
-            chunkSize:chunkSize
-        )
+          return bitmapData
+      }
+      
+      AsyncFunction("generateBytecodeBase64Async") { (base64String: String, printerWidth: Int, mtuSize: Int) -> [String] in
+          
+          let bitmapData = self.prepareImageForThermalPrinter(
+              base64ImageString:base64String,
+              printerWidth:printerWidth,
+              mtuSize:mtuSize
+          )
+          
+          let base64String = prepareImageForBase64ThermalPrinter(lines: bitmapData)
 
-        return bitmapData
-    }
+          return base64String
+      }
       
       
   }
@@ -86,8 +99,15 @@ public class ThermalPrintModule: Module {
 
         return monochromeData
     }
+    
+    func prepareImageForBase64ThermalPrinter(lines: [[UInt8]])-> [String]{
+        
+        let base64Strings = lines.map{ Data($0).base64EncodedString() }
+        
+        return base64Strings
+    }
 
-    func prepareImageForThermalPrinter(base64ImageString: String, printerWidth: Int, chunkSize: Int) -> [[UInt8]] {
+    func prepareImageForThermalPrinter(base64ImageString: String, printerWidth: Int, mtuSize: Int) -> [[UInt8]] {
         // 1. Decode Base64 image
         guard let decodedData = Data(base64Encoded: base64ImageString),
               let decodedImage = UIImage(data: decodedData) else {
@@ -136,20 +156,32 @@ public class ThermalPrintModule: Module {
             imageData.append(lineData)
         }
 
-        // 7. Combine header and image data into larger chunks
+        // 7. Combine header and image data into larger chunks based on MTU size
         var chunkedData = [[UInt8]]()
-        for chunk in imageData.chunked(into: chunkSize) {
-            let combinedChunk = chunk.reduce([UInt8]()) { acc, byteArray in
-                return acc + byteArray
+        var currentChunk = [UInt8]()
+        var remainingMtu = mtuSize
+
+        // Add header as the first chunk
+        currentChunk.append(contentsOf: header)
+        remainingMtu -= header.count
+
+        for line in imageData {
+            if line.count <= remainingMtu {
+                currentChunk.append(contentsOf: line)
+                remainingMtu -= line.count
+            } else {
+                chunkedData.append(currentChunk)
+                currentChunk = line
+                remainingMtu = mtuSize - line.count
             }
-            chunkedData.append(combinedChunk)
         }
 
-        // 8. Add header to the first chunk if necessary (you can decide if it’s for the first or all chunks)
-        var result = [[UInt8]]()
-        result.append(header) // Adding header to the first chunk
-        result.append(contentsOf: chunkedData)
+        // Add the last chunk if any
+        if !currentChunk.isEmpty {
+            chunkedData.append(currentChunk)
+        }
 
-        return result
+
+        return chunkedData
     }
 }

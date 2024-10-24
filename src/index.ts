@@ -15,23 +15,23 @@ export const PI = ThermalPrintModule.PI;
 export async function generateBytecodeAsync(
   value: string,
   printerWidth: number,
-  chunkSize: number
+  mtuSize: number
 ): Promise<Uint8Array[]> {
   return await ThermalPrintModule.generateBytecodeAsync(
     value,
     printerWidth,
-    chunkSize
+    mtuSize
   );
 }
 export async function generateBytecodeBase64Async(
   value: string,
   printerWidth: number,
-  chunkSize: number
+  mtuSize: number
 ): Promise<string[]> {
   return (await ThermalPrintModule.generateBytecodeBase64Async(
     value,
     printerWidth,
-    chunkSize
+    mtuSize
   )) as string[];
 }
 

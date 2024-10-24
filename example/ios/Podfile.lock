@@ -1248,7 +1248,7 @@ PODS:
     - libwebp (~> 1.0)
     - SDWebImage/Core (~> 5.17)
   - SocketRocket (0.7.0)
-  - ThermalPrint (0.1.0):
+  - ThermalPrint (0.2.0):
     - ExpoModulesCore
   - Yoga (0.0.0)
 
@@ -1535,7 +1535,7 @@ SPEC CHECKSUMS:
   SDWebImage: dfe95b2466a9823cf9f0c6d01217c06550d7b29a
   SDWebImageWebPCoder: e38c0a70396191361d60c092933e22c20d5b1380
   SocketRocket: abac6f5de4d4d62d24e11868d7a2f427e0ef940d
-  ThermalPrint: ebb98e92723e33f495bdc0eda265c9a81c2a19fe
+  ThermalPrint: 7460d3d780fd510df8bc35fb1e95f1d2092faa4d
   Yoga: 950bbfd7e6f04790fdb51149ed51df41f329fcc8
 
 PODFILE CHECKSUM: fee36bc9301e18a573e4991842daa59fb80d41b9
