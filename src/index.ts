@@ -8,6 +8,7 @@ import {
 // and on native platforms to ThermalPrint.ts
 import { ChangeEventPayload } from "./ThermalPrint.types";
 import ThermalPrintModule from "./ThermalPrintModule";
+import { EventSubscription } from "expo-modules-core/build/ts-declarations/EventEmitter";
 
 // Get the native constant value.
 export const PI = ThermalPrintModule.PI;
@@ -47,24 +48,6 @@ export async function sendToUsbThermalPrinterAsync(
   );
 }
 
-export async function sendToBluetoothThermalPrinterAsync(
-  value: string,
-  printerWidth: number,
-  chunkSize: number,
-  deviceMac: string,
-  serviceUUID: string,
-  characteristicUUID: string
-) {
-  return await ThermalPrintModule.sendToBluetoothThermalPrinterAsync(
-    value,
-    printerWidth,
-    chunkSize,
-    deviceMac,
-    serviceUUID,
-    characteristicUUID
-  );
-}
-
 const emitter = new EventEmitter(
   ThermalPrintModule ?? NativeModulesProxy.ThermalPrint
 );
@@ -85,3 +68,44 @@ export function addGeneratedBytecodeListener(
 }
 
 export { ChangeEventPayload };
+
+/// NEW BLUETOOTH FUNCTIONS
+
+export type DeviceFound = {
+  id: string;
+  name: string;
+};
+
+export type DeviceFoundEvent = {
+  devices: DeviceFound[];
+};
+
+export function bluetoothDevicesScannedListener(
+  listener: (event: DeviceFoundEvent) => void
+): EventSubscription {
+  return ThermalPrintModule.addListener("newDeviceFound", listener);
+}
+
+export async function scanForBlueToothDevices(): Promise<void> {
+  return await ThermalPrintModule.scanForBlueToothDevices();
+}
+
+export async function connectToBlueToothDevice(
+  deviceId: string
+): Promise<void> {
+  return await ThermalPrintModule.connectToBlueToothDevice(deviceId);
+}
+
+export async function disconnectFromBlueToothDevice() {
+  return await ThermalPrintModule.disconnectFromBlueToothDevice();
+}
+
+export async function sendToBluetoothThermalPrinterAsync(
+  value: string,
+  printerWidth: number
+) {
+  return await ThermalPrintModule.sendToBluetoothThermalPrinterAsync(
+    value,
+    printerWidth
+  );
+}

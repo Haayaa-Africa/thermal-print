@@ -12,11 +12,15 @@ import kotlin.math.roundToInt
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import androidx.core.os.bundleOf
+import expo.modules.kotlin.Promise
 
 class ThermalPrintModule : Module() {
   private var printerConnection: UsbDeviceConnection? = null
   private var printerInterface: UsbInterface? = null
   private var endpoint: UsbEndpoint? = null
+
+  private lateinit var bluetoothManager: BluetoothManager
 
   companion object {
     const val USB_PERMISSION_ACTION = "ng.haayaa.thermalprint.USB_PERMISSION"
@@ -65,9 +69,33 @@ class ThermalPrintModule : Module() {
       connectToPrinter(lines);
     }
 
-    AsyncFunction("sendToBluetoothThermalPrinterAsync") { base64String: String, printerWidth: Int, chunkSize: Int,  deviceMac: String, serviceUUID: String, characteristicUUID: String ->
+    /// NEW BLUETOOTH FUNCTIONS
 
-      val lines = prepareImageForThermalPrinter(base64String, printerWidth, chunkSize)
+    Events("newDeviceFound")
+
+    AsyncFunction("scanForBlueToothDevices") {
+      scanForDevices{
+          devices -> this@ThermalPrintModule.sendEvent("newDeviceFound", bundleOf("devices"  to devices))
+      }
+    }
+
+    AsyncFunction("connectToBlueToothDevice") { deviceId: String, promise: Promise ->
+      promise.resolve(
+        connectToBluetoothPrinterWithId(deviceId)
+      )
+    }
+
+    AsyncFunction("disconnectFromBlueToothDevice") { promise: Promise ->
+      promise.resolve(
+        disconnect()
+      )
+    }
+
+    AsyncFunction("sendToBluetoothThermalPrinterAsync") { base64String: String, printerWidth: Int ->
+
+      val lines = prepareImageForThermalPrinter(base64String, printerWidth, bluetoothManager.getAllowedMtu() ?: 20)
+
+      printWithBluetoothPrinter(lines)
     }
   }
 
@@ -318,5 +346,46 @@ class ThermalPrintModule : Module() {
         Log.e("ThermalPrint", "Thread was interrupted", e)
       }
     }
+  }
+
+  private fun scanForDevices (onDeviceFound: (List<Map<String, String>>) -> Unit) {
+    val appContext = this.appContext.reactContext?.applicationContext;
+
+    if (appContext === null) return;
+
+    bluetoothManager = BluetoothManager(appContext)
+
+    if (!bluetoothManager.isBluetoothSupported()) {
+      Log.d("BLUETOOTH APP LOG", "Bluetooth is not supported on this device")
+      return
+    }
+
+    val activity = this.appContext.currentActivity;
+
+    if ( activity === null) return;
+
+    bluetoothManager.requestBluetoothPermissions(activity)
+
+    if (bluetoothManager.isBluetoothEnabled()){
+      bluetoothManager.startScanning(onDeviceFound)
+    }else {
+      Log.d("BLUETOOTH APP LOG", "Please enable bluetooth")
+    }
+  }
+
+  private fun connectToBluetoothPrinterWithId(deviceId: String){
+    if (!bluetoothManager.isBluetoothEnabled()) return;
+
+    bluetoothManager.connectToDevice(deviceId)
+  }
+
+  private fun printWithBluetoothPrinter(lines: List<ByteArray>){
+    if (!bluetoothManager.isBluetoothEnabled()) return;
+
+    bluetoothManager.printWithDevice(lines)
+  }
+
+  private fun disconnect(){
+    bluetoothManager.disconnect()
   }
 }

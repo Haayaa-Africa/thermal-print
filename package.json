@@ -28,15 +28,18 @@
   "author": "Adinnu Benedict <benidixt@gmail.com> (https://github.com/BenQoder)",
   "license": "MIT",
   "homepage": "https://github.com/haayaa/thermal-printer#readme",
-  "dependencies": {},
   "devDependencies": {
     "@types/react": "^18.0.25",
     "expo-module-scripts": "^3.5.2",
-    "expo-modules-core": "^1.12.24"
+    "expo-modules-core": "^1.12.24",
+    "expo-yarn-workspaces": "^2.3.2"
   },
   "peerDependencies": {
     "expo": "*",
     "react": "*",
     "react-native": "*"
+  },
+  "dependencies": {
+    "@config-plugins/repo": "github:expo/config-plugins"
   }
 }

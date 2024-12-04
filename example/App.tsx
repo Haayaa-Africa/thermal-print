@@ -1,58 +1,45 @@
-import { Buffer } from "buffer";
 import * as ImageManipulator from "expo-image-manipulator";
 import React, { useRef, useState } from "react";
 import {
   Alert,
   Button,
   PermissionsAndroid,
-  PixelRatio,
   Platform,
   StyleSheet,
-  Text,
   View,
   Image,
 } from "react-native";
-import { BleManager, Device, Service } from "react-native-ble-plx";
 import { captureRef } from "react-native-view-shot";
 import * as ThermalPrint from "thermal-print";
-
-export const manager = new BleManager();
 
 const printerName = "58MINI_C0A3";
 
 export default function App() {
   const viewRef = useRef<View>();
-  const [selectedDevice, setSelectedDevice] = useState<Device>();
+
+  function manualyScanForBlueTooth() {
+    ThermalPrint.scanForBlueToothDevices();
+  }
+
+  // {"id": "86:67:7A:26:C0:A3", "name": "58MINI_C0A3"}
+
+  const [devices, setDevices] = useState<ThermalPrint.DeviceFound[]>([]);
+
+  const deviceConnected = useRef<ThermalPrint.DeviceFound>();
 
   React.useEffect(() => {
-    const subscription = manager.onStateChange((state) => {
-      if (state === "PoweredOn") {
-        scanAndConnect();
-        subscription.remove();
-      }
-    }, true);
-    return () => subscription.remove();
-  }, [manager]);
-
-  function scanAndConnect() {
-    manager.startDeviceScan(null, null, (error, device) => {
-      if (error) {
-        // Handle error (scanning will be stopped automatically)
+    ThermalPrint.bluetoothDevicesScannedListener((devices) => {
+      if (deviceConnected.current) {
         return;
       }
 
-      console.log(device?.name);
-
-      if (device && device.name === printerName) {
-        // Stop scanning as it's not necessary if you are scanning for one device.
-        setSelectedDevice(device);
-        manager.stopDeviceScan();
-      }
+      setDevices(devices.devices);
     });
-  }
+  }, []);
 
   const printSomthing = async () => {
-    if (!selectedDevice) {
+    console.log(deviceConnected.current);
+    if (!deviceConnected.current) {
       Alert.alert("Select A device");
 
       return;
@@ -87,51 +74,7 @@ export default function App() {
       return Alert.alert("Cannot Manipulate");
     }
 
-    selectedDevice
-      .connect({
-        requestMTU: 512,
-      })
-      .then((device) => {
-        return device.discoverAllServicesAndCharacteristics();
-      })
-      .then(async (device) => {
-        if (!manipulate.base64) {
-          return Alert.alert("Cannot Manipulate");
-        }
-
-        console.log("MTU", device.mtu);
-
-        const toPrint = await ThermalPrint.generateBytecodeBase64Async(
-          manipulate.base64,
-          384,
-          device.mtu
-        );
-
-        console.log("Length", toPrint.length);
-
-        const services = await device.services();
-        let correctCharacteristic = null;
-
-        for (const service of services) {
-          const characteristics = await service.characteristics();
-
-          correctCharacteristic = characteristics.find(
-            // eslint-disable-next-line prettier/prettier
-            (characteristic) => characteristic.isWritableWithResponse
-          );
-
-          if (correctCharacteristic) {
-            break;
-          }
-        }
-
-        if (correctCharacteristic && toPrint.length) {
-          await Promise.all(
-            toPrint.map((line) => correctCharacteristic.writeWithResponse(line))
-          );
-        }
-      })
-      .catch((error) => {});
+    ThermalPrint.sendToBluetoothThermalPrinterAsync(manipulate.base64, 384);
   };
 
   const checkPermission = async () => {
@@ -221,6 +164,31 @@ export default function App() {
       <Button title="Print with USB" onPress={printViaPrinter} />
       <Button title="Check Permission" onPress={checkPermission} />
       <Button title="Print with Bluetootha" onPress={printSomthing} />
+      <Button
+        title="Scan Bluetooth Devices"
+        onPress={manualyScanForBlueTooth}
+      />
+
+      <Button
+        title="Connect Bluetooth"
+        onPress={() => {
+          const ourDevice = devices.find((d) => d.name === printerName);
+
+          if (ourDevice) {
+            deviceConnected.current = ourDevice;
+
+            ThermalPrint.connectToBlueToothDevice(ourDevice.id);
+          }
+        }}
+      />
+
+      <Button
+        title="Disconnect Bluetooth"
+        onPress={() => {
+          deviceConnected.current = undefined;
+          ThermalPrint.disconnectFromBlueToothDevice();
+        }}
+      />
 
       <View
         style={{
