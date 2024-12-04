@@ -24,15 +24,15 @@ export default function App() {
   const viewRef = useRef<View>();
   const [selectedDevice, setSelectedDevice] = useState<Device>();
 
-  React.useEffect(() => {
-    const subscription = manager.onStateChange((state) => {
-      if (state === "PoweredOn") {
-        scanAndConnect();
-        subscription.remove();
-      }
-    }, true);
-    return () => subscription.remove();
-  }, [manager]);
+  // React.useEffect(() => {
+  //   const subscription = manager.onStateChange((state) => {
+  //     if (state === "PoweredOn") {
+  //       scanAndConnect();
+  //       subscription.remove();
+  //     }
+  //   }, true);
+  //   return () => subscription.remove();
+  // }, [manager]);
 
   function scanAndConnect() {
     manager.startDeviceScan(null, null, (error, device) => {
@@ -51,8 +51,38 @@ export default function App() {
     });
   }
 
+  function manualyScanForBlueTooth() {
+    ThermalPrint.scanForBlueToothDevices();
+  }
+
+  // {"id": "86:67:7A:26:C0:A3", "name": "58MINI_C0A3"}
+
+  const [devices, setDevices] = useState<ThermalPrint.DeviceFound[]>([]);
+
+  const deviceConnected = useRef<ThermalPrint.DeviceFound>();
+
+  React.useEffect(() => {
+    ThermalPrint.devicesScannedListener((devices) => {
+      if (deviceConnected.current) {
+        return;
+      }
+
+      console.log(devices.devices);
+      setDevices(devices.devices);
+
+      const ourDevice = devices.devices.find((d) => d.name === "58MINI_C0A3");
+
+      if (ourDevice) {
+        deviceConnected.current = ourDevice;
+
+        ThermalPrint.connectToBlueToothDevice(ourDevice.id);
+      }
+    });
+  }, []);
+
   const printSomthing = async () => {
-    if (!selectedDevice) {
+    console.log(deviceConnected.current);
+    if (!deviceConnected.current) {
       Alert.alert("Select A device");
 
       return;
@@ -87,51 +117,12 @@ export default function App() {
       return Alert.alert("Cannot Manipulate");
     }
 
-    selectedDevice
-      .connect({
-        requestMTU: 512,
-      })
-      .then((device) => {
-        return device.discoverAllServicesAndCharacteristics();
-      })
-      .then(async (device) => {
-        if (!manipulate.base64) {
-          return Alert.alert("Cannot Manipulate");
-        }
-
-        console.log("MTU", device.mtu);
-
-        const toPrint = await ThermalPrint.generateBytecodeBase64Async(
-          manipulate.base64,
-          384,
-          device.mtu
-        );
-
-        console.log("Length", toPrint.length);
-
-        const services = await device.services();
-        let correctCharacteristic = null;
-
-        for (const service of services) {
-          const characteristics = await service.characteristics();
-
-          correctCharacteristic = characteristics.find(
-            // eslint-disable-next-line prettier/prettier
-            (characteristic) => characteristic.isWritableWithResponse
-          );
-
-          if (correctCharacteristic) {
-            break;
-          }
-        }
-
-        if (correctCharacteristic && toPrint.length) {
-          await Promise.all(
-            toPrint.map((line) => correctCharacteristic.writeWithResponse(line))
-          );
-        }
-      })
-      .catch((error) => {});
+    ThermalPrint.sendToBluetoothThermalPrinterAsync(
+      deviceConnected.current?.id,
+      manipulate.base64,
+      384,
+      240
+    );
   };
 
   const checkPermission = async () => {
@@ -221,6 +212,10 @@ export default function App() {
       <Button title="Print with USB" onPress={printViaPrinter} />
       <Button title="Check Permission" onPress={checkPermission} />
       <Button title="Print with Bluetootha" onPress={printSomthing} />
+      <Button
+        title="Scan Bluetooth Devices"
+        onPress={manualyScanForBlueTooth}
+      />
 
       <View
         style={{

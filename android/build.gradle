@@ -44,4 +44,5 @@ android {
 
 dependencies {
     implementation project(':react-native-ble-plx')
+    implementation "com.polidea.rxandroidble3:rxandroidble:1.19.0"
 }

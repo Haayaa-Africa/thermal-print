@@ -15,12 +15,19 @@ extension Array {
 }
 
 public class ThermalPrintModule: Module {
+
+    private var bluetoothManager: BluetoothManager? = nil
+    
   public func definition() -> ModuleDefinition {
     Name("ThermalPrint")
 
     Constants([
       "PI": Double.pi
     ])
+      
+      OnCreate {
+          bluetoothManager = BluetoothManager()
+      }
 
     Events("onChange")
       
@@ -61,6 +68,37 @@ public class ThermalPrintModule: Module {
       }
       
       
+      /// NEW BLUETOOTH FUNCTIONS
+      
+      Events("newDeviceFound")
+      
+      AsyncFunction("scanForBlueToothDevices") {
+          scanForDevices{ devices in
+              self.sendEvent("newDeviceFound", [
+                "devices": devices
+              ])
+          }
+      }
+      
+      AsyncFunction("connectToBlueToothDevice") { (deviceId: String) in
+          connectToDevice(address: deviceId)
+      }
+      
+      AsyncFunction("sendToBluetoothThermalPrinterAsync") { (deviceId: String, base64String: String, printerWidth: Int) in
+          
+          let mtuSize = bluetoothManager?.getAllowedMtu() ?? 20
+          
+          let bitmapData = self.prepareImageForThermalPrinter(
+              base64ImageString: base64String,
+              printerWidth: printerWidth,
+              mtuSize: mtuSize
+          )
+          
+          print("Printing With Length \(bitmapData.count) bytes and \(mtuSize)")
+          
+          printWithDevice(lines: bitmapData)
+       
+      }
   }
 
     func convertTo1BitMonochrome(bitmap: UIImage, maxWidth: Int) -> [UInt8] {
@@ -183,5 +221,61 @@ public class ThermalPrintModule: Module {
 
 
         return chunkedData
+    }
+    
+    private func scanForDevices(onDeviceFound: @escaping ([[String: String]]) -> Void) {
+        guard let manager = bluetoothManager else {
+            print("BluetoothManager is not initialized")
+            return
+        }
+        
+        guard manager.isBluetoothSupported() else {
+            print("Bluetooth is not supported on this device")
+            return
+        }
+        
+        guard manager.isBluetoothEnabled() else {
+            print("Please enable Bluetooth")
+            return
+        }
+        
+        // Start scanning for devices
+        manager.startScanning { devices in
+            onDeviceFound(devices)
+        }
+    }
+    
+    private func connectToDevice(address: String) {
+        guard let manager = bluetoothManager else {
+            print("BluetoothManager is not initialized")
+            return
+        }
+        
+        guard manager.isBluetoothSupported() else {
+            print("Bluetooth is not supported on this device")
+            return
+        }
+        
+        guard let uuid = UUID(uuidString: address) else {
+            print("Invalid UUID string: \(address)")
+            return
+        }
+        
+        manager.connectToDevice(identifier: uuid)
+    }
+    
+    private func printWithDevice(lines: [[UInt8]]){
+        guard let manager = bluetoothManager else {
+            print("BluetoothManager is not initialized")
+            return
+        }
+        
+        guard manager.isBluetoothSupported() else {
+            print("Bluetooth is not supported on this device")
+            return
+        }
+        
+        bluetoothManager?.printWithDevice(data: lines)
+        
     }
 }
