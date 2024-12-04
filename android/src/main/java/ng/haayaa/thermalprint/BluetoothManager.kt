@@ -110,6 +110,23 @@ class BluetoothManager(private val context: Context) {
         if (disposable != null) compositeDisposable.add(disposable)
     }
 
+    fun disconnect() {
+        if (connection == null) {
+            Log.d("BluetoothManager", "No active connection to disconnect.")
+            return
+        }
+
+        try {
+            // Dispose of the active connection to disconnect
+            compositeDisposable.clear()
+            connection = null
+            device = null
+            Log.d("BluetoothManager", "Disconnected successfully.")
+        } catch (e: Exception) {
+            Log.e("BluetoothManager", "Error while disconnecting: ${e.message}")
+        }
+    }
+
     fun printWithDevice(lines: List<ByteArray>) {
         if (connection == null) {
             return

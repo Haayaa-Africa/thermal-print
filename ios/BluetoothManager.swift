@@ -5,7 +5,6 @@
 //  Created by BenQoder on 04/12/2024.
 //
 
-
 import CoreBluetooth
 import Foundation
 
@@ -50,6 +49,15 @@ class BluetoothManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
         if let peripheral = discoveredPeripherals.first(where: { $0.identifier == identifier }) {
             centralManager.connect(peripheral, options: nil)
         }
+    }
+    
+    func disconnect() {
+        guard let peripheral = connectedPeripheral else {
+            print("No device is currently connected to disconnect.")
+            return
+        }
+        
+        centralManager.cancelPeripheralConnection(peripheral)
     }
     
     func printWithDevice(data: [[UInt8]]) {
@@ -116,6 +124,19 @@ class BluetoothManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
         connectedPeripheral = peripheral
         peripheral.delegate = self
         peripheral.discoverServices(nil)
+    }
+    
+    func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
+        if let error = error {
+            print("Error while disconnecting from peripheral \(peripheral.name ?? "Unknown"): \(error.localizedDescription)")
+        } else {
+            print("Successfully disconnected from peripheral \(peripheral.name ?? "Unknown")")
+        }
+        
+        // Reset the connectedPeripheral variable
+        if peripheral == connectedPeripheral {
+            connectedPeripheral = nil
+        }
     }
     
     // MARK: - CBPeripheralDelegate

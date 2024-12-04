@@ -48,19 +48,6 @@ export async function sendToUsbThermalPrinterAsync(
   );
 }
 
-export async function sendToBluetoothThermalPrinterAsync(
-  deviceMac: string,
-  value: string,
-  printerWidth: number,
-  chunkSize: number
-) {
-  return await ThermalPrintModule.sendToBluetoothThermalPrinterAsync(
-    deviceMac,
-    value,
-    printerWidth
-  );
-}
-
 const emitter = new EventEmitter(
   ThermalPrintModule ?? NativeModulesProxy.ThermalPrint
 );
@@ -93,7 +80,7 @@ export type DeviceFoundEvent = {
   devices: DeviceFound[];
 };
 
-export function devicesScannedListener(
+export function bluetoothDevicesScannedListener(
   listener: (event: DeviceFoundEvent) => void
 ): EventSubscription {
   return ThermalPrintModule.addListener("newDeviceFound", listener);
@@ -107,4 +94,18 @@ export async function connectToBlueToothDevice(
   deviceId: string
 ): Promise<void> {
   return await ThermalPrintModule.connectToBlueToothDevice(deviceId);
+}
+
+export async function disconnectFromBlueToothDevice() {
+  return await ThermalPrintModule.disconnectFromBlueToothDevice();
+}
+
+export async function sendToBluetoothThermalPrinterAsync(
+  value: string,
+  printerWidth: number
+) {
+  return await ThermalPrintModule.sendToBluetoothThermalPrinterAsync(
+    value,
+    printerWidth
+  );
 }

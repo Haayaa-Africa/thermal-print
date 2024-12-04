@@ -85,7 +85,13 @@ class ThermalPrintModule : Module() {
       )
     }
 
-    AsyncFunction("sendToBluetoothThermalPrinterAsync") { deviceMac: String, base64String: String, printerWidth: Int ->
+    AsyncFunction("disconnectFromBlueToothDevice") { promise: Promise ->
+      promise.resolve(
+        disconnect()
+      )
+    }
+
+    AsyncFunction("sendToBluetoothThermalPrinterAsync") { base64String: String, printerWidth: Int ->
 
       val lines = prepareImageForThermalPrinter(base64String, printerWidth, bluetoothManager.getAllowedMtu() ?: 20)
 
@@ -377,5 +383,9 @@ class ThermalPrintModule : Module() {
     if (!bluetoothManager.isBluetoothEnabled()) return;
 
     bluetoothManager.printWithDevice(lines)
+  }
+
+  private fun disconnect(){
+    bluetoothManager.disconnect()
   }
 }

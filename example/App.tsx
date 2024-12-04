@@ -1,55 +1,21 @@
-import { Buffer } from "buffer";
 import * as ImageManipulator from "expo-image-manipulator";
 import React, { useRef, useState } from "react";
 import {
   Alert,
   Button,
   PermissionsAndroid,
-  PixelRatio,
   Platform,
   StyleSheet,
-  Text,
   View,
   Image,
 } from "react-native";
-import { BleManager, Device, Service } from "react-native-ble-plx";
 import { captureRef } from "react-native-view-shot";
 import * as ThermalPrint from "thermal-print";
-
-export const manager = new BleManager();
 
 const printerName = "58MINI_C0A3";
 
 export default function App() {
   const viewRef = useRef<View>();
-  const [selectedDevice, setSelectedDevice] = useState<Device>();
-
-  // React.useEffect(() => {
-  //   const subscription = manager.onStateChange((state) => {
-  //     if (state === "PoweredOn") {
-  //       scanAndConnect();
-  //       subscription.remove();
-  //     }
-  //   }, true);
-  //   return () => subscription.remove();
-  // }, [manager]);
-
-  function scanAndConnect() {
-    manager.startDeviceScan(null, null, (error, device) => {
-      if (error) {
-        // Handle error (scanning will be stopped automatically)
-        return;
-      }
-
-      console.log(device?.name);
-
-      if (device && device.name === printerName) {
-        // Stop scanning as it's not necessary if you are scanning for one device.
-        setSelectedDevice(device);
-        manager.stopDeviceScan();
-      }
-    });
-  }
 
   function manualyScanForBlueTooth() {
     ThermalPrint.scanForBlueToothDevices();
@@ -62,21 +28,12 @@ export default function App() {
   const deviceConnected = useRef<ThermalPrint.DeviceFound>();
 
   React.useEffect(() => {
-    ThermalPrint.devicesScannedListener((devices) => {
+    ThermalPrint.bluetoothDevicesScannedListener((devices) => {
       if (deviceConnected.current) {
         return;
       }
 
-      console.log(devices.devices);
       setDevices(devices.devices);
-
-      const ourDevice = devices.devices.find((d) => d.name === "58MINI_C0A3");
-
-      if (ourDevice) {
-        deviceConnected.current = ourDevice;
-
-        ThermalPrint.connectToBlueToothDevice(ourDevice.id);
-      }
     });
   }, []);
 
@@ -117,12 +74,7 @@ export default function App() {
       return Alert.alert("Cannot Manipulate");
     }
 
-    ThermalPrint.sendToBluetoothThermalPrinterAsync(
-      deviceConnected.current?.id,
-      manipulate.base64,
-      384,
-      240
-    );
+    ThermalPrint.sendToBluetoothThermalPrinterAsync(manipulate.base64, 384);
   };
 
   const checkPermission = async () => {
@@ -215,6 +167,27 @@ export default function App() {
       <Button
         title="Scan Bluetooth Devices"
         onPress={manualyScanForBlueTooth}
+      />
+
+      <Button
+        title="Connect Bluetooth"
+        onPress={() => {
+          const ourDevice = devices.find((d) => d.name === printerName);
+
+          if (ourDevice) {
+            deviceConnected.current = ourDevice;
+
+            ThermalPrint.connectToBlueToothDevice(ourDevice.id);
+          }
+        }}
+      />
+
+      <Button
+        title="Disconnect Bluetooth"
+        onPress={() => {
+          deviceConnected.current = undefined;
+          ThermalPrint.disconnectFromBlueToothDevice();
+        }}
       />
 
       <View

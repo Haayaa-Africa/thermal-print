@@ -84,7 +84,11 @@ public class ThermalPrintModule: Module {
           connectToDevice(address: deviceId)
       }
       
-      AsyncFunction("sendToBluetoothThermalPrinterAsync") { (deviceId: String, base64String: String, printerWidth: Int) in
+      AsyncFunction("disconnectFromBlueToothDevice") {
+          bluetoothManager?.disconnect()
+      }
+      
+      AsyncFunction("sendToBluetoothThermalPrinterAsync") { (base64String: String, printerWidth: Int) in
           
           let mtuSize = bluetoothManager?.getAllowedMtu() ?? 20
           
