@@ -81,7 +81,7 @@ export type DeviceFoundEvent = {
 };
 
 export function bluetoothDevicesScannedListener(
-  listener: (event: DeviceFoundEvent) => void
+  listener: (event: DeviceFoundEvent[]) => void
 ): EventSubscription {
   return ThermalPrintModule.addListener("newDeviceFound", listener);
 }
