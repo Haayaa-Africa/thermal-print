@@ -17,15 +17,22 @@ const printerName = "58MINI_C0A3";
 export default function App() {
   const viewRef = useRef<View>();
 
-  function manualyScanForBlueTooth() {
-    ThermalPrint.scanForBlueToothDevices();
+  async function manualyScanForBlueTooth() {
+    console.log("Scanner Start", await ThermalPrint.scanForBlueToothDevices());
+  }
+
+  async function manualyScanForBlueToothSuspend() {
+    console.log(
+      "Scanner Suspend",
+      await ThermalPrint.suspendScanForBlueToothDevices()
+    );
   }
 
   // {"id": "86:67:7A:26:C0:A3", "name": "58MINI_C0A3"}
 
-  const [devices, setDevices] = useState<ThermalPrint.DeviceFound[]>([]);
+  const [devices, setDevices] = useState<ThermalPrint.Device[]>([]);
 
-  const deviceConnected = useRef<ThermalPrint.DeviceFound>();
+  const deviceConnected = useRef<ThermalPrint.Device>();
 
   React.useEffect(() => {
     ThermalPrint.bluetoothDevicesScannedListener((devices) => {
@@ -165,19 +172,23 @@ export default function App() {
       <Button title="Check Permission" onPress={checkPermission} />
       <Button title="Print with Bluetootha" onPress={printSomthing} />
       <Button
+        title="Start Bluetooth"
+        onPress={ThermalPrint.initializeBluetooth}
+      />
+      <Button
         title="Scan Bluetooth Devices"
         onPress={manualyScanForBlueTooth}
       />
 
       <Button
         title="Connect Bluetooth"
-        onPress={() => {
+        onPress={async () => {
           const ourDevice = devices.find((d) => d.name === printerName);
 
           if (ourDevice) {
             deviceConnected.current = ourDevice;
 
-            ThermalPrint.connectToBlueToothDevice(ourDevice.id);
+            await ThermalPrint.connectToBlueToothDevice(ourDevice.id);
           }
         }}
       />
@@ -188,6 +199,10 @@ export default function App() {
           deviceConnected.current = undefined;
           ThermalPrint.disconnectFromBlueToothDevice();
         }}
+      />
+      <Button
+        title="Suspend Bluetooth Scan"
+        onPress={manualyScanForBlueToothSuspend}
       />
 
       <View

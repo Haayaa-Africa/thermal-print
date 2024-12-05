@@ -29,22 +29,7 @@ class ThermalPrintModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("ThermalPrint")
 
-    Constants(
-      "PI" to Math.PI
-    )
-
-    Events("onChange")
     Events("onGenerateBytecode")
-
-    Function("hello") {
-      "Hello world! 👋"
-    }
-
-    AsyncFunction("setValueAsync") { value: String ->
-      sendEvent("onChange", mapOf(
-        "value" to value
-      ))
-    }
 
     AsyncFunction("generateBytecodeAsync") { base64String: String, printerWidth: Int, mtuSize: Int ->
 
@@ -71,31 +56,38 @@ class ThermalPrintModule : Module() {
 
     /// NEW BLUETOOTH FUNCTIONS
 
-    Events("newDeviceFound")
+    Events("newDevicesFound")
 
-    AsyncFunction("scanForBlueToothDevices") {
-      scanForDevices{
-          devices -> this@ThermalPrintModule.sendEvent("newDeviceFound", bundleOf("devices"  to devices))
-      }
+    AsyncFunction("initializeBluetooth") { promise: Promise ->
+      initializeBluetooth(promise)
+    }
+
+    AsyncFunction("scanForBlueToothDevices") { promise: Promise ->
+      scanForDevices(
+        onDeviceFound = { devices ->
+          sendEvent("newDevicesFound", bundleOf("devices" to devices))
+        },
+        promise = promise
+      )
+    }
+
+    AsyncFunction("suspendScanForBlueToothDevices") {promise: Promise ->
+      stopScanning(promise)
     }
 
     AsyncFunction("connectToBlueToothDevice") { deviceId: String, promise: Promise ->
-      promise.resolve(
-        connectToBluetoothPrinterWithId(deviceId)
-      )
+        connectToBluetoothPrinterWithId(deviceId, promise)
     }
 
     AsyncFunction("disconnectFromBlueToothDevice") { promise: Promise ->
-      promise.resolve(
-        disconnect()
-      )
+        disconnect(promise)
     }
 
-    AsyncFunction("sendToBluetoothThermalPrinterAsync") { base64String: String, printerWidth: Int ->
+    AsyncFunction("sendToBluetoothThermalPrinterAsync") { base64String: String, printerWidth: Int, promise: Promise ->
 
       val lines = prepareImageForThermalPrinter(base64String, printerWidth, bluetoothManager.getAllowedMtu() ?: 20)
 
-      printWithBluetoothPrinter(lines)
+      printWithBluetoothPrinter(lines, promise)
     }
   }
 
@@ -348,44 +340,77 @@ class ThermalPrintModule : Module() {
     }
   }
 
-  private fun scanForDevices (onDeviceFound: (List<Map<String, String>>) -> Unit) {
+  private fun initializeBluetooth(promise: Promise){
     val appContext = this.appContext.reactContext?.applicationContext;
 
-    if (appContext === null) return;
+    if (appContext === null) {
+      return promise.reject(
+        "NoAppContext", "Cannot initialize Bluetooth without an application context", Exception("NoAppContext")
+      )
+    }
 
     bluetoothManager = BluetoothManager(appContext)
 
     if (!bluetoothManager.isBluetoothSupported()) {
-      Log.d("BLUETOOTH APP LOG", "Bluetooth is not supported on this device")
-      return
+      return promise.reject(
+        "BluetoothNotSupported", "Bluetooth is not supported on this device", Exception("BluetoothNotSupported")
+      )
     }
 
     val activity = this.appContext.currentActivity;
 
-    if ( activity === null) return;
-
-    bluetoothManager.requestBluetoothPermissions(activity)
-
-    if (bluetoothManager.isBluetoothEnabled()){
-      bluetoothManager.startScanning(onDeviceFound)
-    }else {
-      Log.d("BLUETOOTH APP LOG", "Please enable bluetooth")
+    if ( activity === null) {
+      return promise.reject(
+        "NoActivity", "Cannot initialize Bluetooth without an activity", Exception("NoActivity")
+      )
     }
+
+    bluetoothManager.requestBluetoothPermissions(activity, promise)
   }
 
-  private fun connectToBluetoothPrinterWithId(deviceId: String){
-    if (!bluetoothManager.isBluetoothEnabled()) return;
+  private fun scanForDevices (onDeviceFound: (List<Map<String, String>>) -> Unit, promise: Promise) {
+    if (bluetoothManager.isBluetoothEnabled()){
+      return bluetoothManager.startScanning(onDeviceFound, promise)
+    }
 
-    bluetoothManager.connectToDevice(deviceId)
+    Log.d("BLUETOOTH APP LOG", "Please enable bluetooth")
+    promise.reject(
+      "BLUETOOTH_ERROR",
+      "Please enable bluetooth",
+      Exception("BLUETOOTH_ERROR")
+    )
+
   }
 
-  private fun printWithBluetoothPrinter(lines: List<ByteArray>){
-    if (!bluetoothManager.isBluetoothEnabled()) return;
-
-    bluetoothManager.printWithDevice(lines)
+  private fun stopScanning(promise: Promise){
+    bluetoothManager.suspendScanning(promise)
   }
 
-  private fun disconnect(){
-    bluetoothManager.disconnect()
+  private fun connectToBluetoothPrinterWithId(deviceId: String, promise: Promise){
+    if (!bluetoothManager.isBluetoothEnabled()) {
+      return promise.reject(
+        "BLUETOOTH_ERROR",
+        "Please enable bluetooth",
+        Exception("BLUETOOTH_ERROR")
+      )
+    }
+
+    bluetoothManager.connectToDevice(deviceId, promise)
+  }
+
+  private fun printWithBluetoothPrinter(lines: List<ByteArray>, promise: Promise){
+    if (!bluetoothManager.isBluetoothEnabled()) {
+      return promise.reject(
+        "BLUETOOTH_ERROR",
+        "Please enable bluetooth",
+        Exception("BLUETOOTH_ERROR")
+      )
+    }
+
+    bluetoothManager.printWithDevice(lines, promise)
+  }
+
+  private fun disconnect(promise: Promise){
+    bluetoothManager.disconnect(promise)
   }
 }

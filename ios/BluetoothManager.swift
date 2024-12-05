@@ -22,6 +22,9 @@ class BluetoothManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
     
     let serialQueue: DispatchQueue = DispatchQueue(label: "com.benqoder.bluetooth.serialQueue");
     
+    var onConnectSuccess: ((CBPeripheral) -> Void)?
+    var onConnectFailure: ((Error) -> Void)?
+    
     override init() {
         super.init()
         centralManager = CBCentralManager(delegate: self, queue: nil)
@@ -45,34 +48,78 @@ class BluetoothManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
         centralManager.scanForPeripherals(withServices: nil, options: nil)
     }
     
-    func connectToDevice(identifier: UUID) {
-        if let peripheral = discoveredPeripherals.first(where: { $0.identifier == identifier }) {
+    func stopScanning() -> Bool {
+        guard centralManager.isScanning else {
+            print("Bluetooth scanning is not currently active.")
+            return true
+        }
+        
+        centralManager.stopScan()
+        return true
+    }
+    
+    func connectToDevice(identifier: UUID) async throws -> Bool {
+
+        guard let peripheral = discoveredPeripherals.first(where: { $0.identifier == identifier }) else {
+            throw NSError(domain: "BluetoothManager", code: 404, userInfo: [NSLocalizedDescriptionKey: "Device not found"])
+        }
+        
+        print("Connecting to \(peripheral.name ?? "Unknown")...")
+
+        return try await withCheckedThrowingContinuation { continuation in
+            // Keep track of the peripheral for the continuation
+            self.onConnectSuccess = { (connectedPeripheral: CBPeripheral) in
+                if connectedPeripheral.identifier == identifier {
+                    continuation.resume(returning: true)
+                }
+            }
+
+            self.onConnectFailure = { error in
+                continuation.resume(throwing: error)
+            }
+
             centralManager.connect(peripheral, options: nil)
         }
     }
     
-    func disconnect() {
+    var onDisconnectSuccess: (() -> Void)?
+    var onDisconnectFailure: ((Error) -> Void)?
+    
+    func disconnect() async throws -> Bool {
         guard let peripheral = connectedPeripheral else {
             print("No device is currently connected to disconnect.")
-            return
+            return true;
         }
         
-        centralManager.cancelPeripheralConnection(peripheral)
+        return try await withCheckedThrowingContinuation { continuation in
+            
+            // Handle disconnection events
+            self.onDisconnectSuccess = {
+                continuation.resume(returning: true)
+            }
+            
+            self.onDisconnectFailure = { error in
+                continuation.resume(throwing: error)
+            }
+            
+            centralManager.cancelPeripheralConnection(peripheral)
+        }
     }
     
-    func printWithDevice(data: [[UInt8]]) {
+    func printWithDevice(data: [[UInt8]]) async throws -> Bool {
         guard let peripheral = connectedPeripheral else {
             print("No connected device")
-            return
+            throw NSError(domain: "BluetoothManager", code: 404, userInfo: [NSLocalizedDescriptionKey: "No connected device"])
         }
         
         print("Print count: \(data.count)")
         
-        for (index, chunk) in data.enumerated() {
-            serialQueue.asyncAfter(deadline: .now() + Double(index) * 0.01) {
-                self.sendPrintData(peripheral: peripheral, data: Data(chunk))
-            }
+        for chunk in data {
+            try await Task.sleep(nanoseconds: 10_000_000)
+            try await sendPrintDataAsync(peripheral: peripheral, data: Data(chunk))
         }
+        
+        return true;
     }
     
     func getAllowedMtu() -> Int {
@@ -93,6 +140,20 @@ class BluetoothManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
         }
         
         peripheral.writeValue(data, for: characteristic, type: .withoutResponse)
+    }
+    
+    private func sendPrintDataAsync(peripheral: CBPeripheral, data: Data) async throws {
+        return try await withCheckedThrowingContinuation { continuation in
+            guard let characteristic = writableCharacteristics.first else {
+                continuation.resume(throwing: NSError(domain: "BluetoothManager", code: 404, userInfo: [NSLocalizedDescriptionKey: "No writable characteristic available"]))
+                return
+            }
+            
+            peripheral.writeValue(data, for: characteristic, type: .withoutResponse)
+            
+            // You could add additional checks for delegate-based confirmation if necessary
+            continuation.resume()
+        }
     }
     
     // MARK: - CBCentralManagerDelegate

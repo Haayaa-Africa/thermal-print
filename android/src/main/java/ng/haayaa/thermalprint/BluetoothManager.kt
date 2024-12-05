@@ -14,6 +14,7 @@ import androidx.core.content.ContextCompat
 import com.polidea.rxandroidble3.RxBleClient
 import com.polidea.rxandroidble3.RxBleConnection
 import com.polidea.rxandroidble3.RxBleDevice
+import expo.modules.kotlin.Promise
 import io.reactivex.rxjava3.disposables.CompositeDisposable
 import io.reactivex.rxjava3.disposables.Disposable
 import java.util.UUID
@@ -40,7 +41,13 @@ class BluetoothManager(private val context: Context) {
     fun isBluetoothSupported(): Boolean = bluetoothAdapter != null
     fun isBluetoothEnabled(): Boolean = bluetoothAdapter?.isEnabled == true
 
-    fun requestBluetoothPermissions(activity: Activity) {
+    private fun arePermissionsGranted(permissions: Array<String>): Boolean {
+        return permissions.all {
+            ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    fun requestBluetoothPermissions(activity: Activity, promise: Promise) {
         val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             arrayOf(
                 Manifest.permission.BLUETOOTH_SCAN,
@@ -55,45 +62,91 @@ class BluetoothManager(private val context: Context) {
             )
         }
 
-        val missingPermissions = permissions.filter {
-            ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
+        if (arePermissionsGranted(permissions)) {
+            promise.resolve(true) // Permissions are already granted
+            return
         }
 
-        if (missingPermissions.isNotEmpty()) {
-            ActivityCompat.requestPermissions(
-                activity,
-                missingPermissions.toTypedArray(),
-                REQUEST_BLUETOOTH_PERMISSIONS
-            )
+        ActivityCompat.requestPermissions(
+            activity,
+            permissions,
+            REQUEST_BLUETOOTH_PERMISSIONS
+        )
+
+
+        if (arePermissionsGranted(permissions)) {
+            promise.resolve(true) // Permissions are already granted
+            return
         }
+
+        promise.resolve(false)
     }
 
-    fun startScanning(onDeviceFound: (List<Map<String, String>>) -> Unit) {
+    fun startScanning(onDeviceFound: (List<Map<String, String>>) -> Unit, promise: Promise) {
         val devicesFound = mutableListOf<Map<String, String>>()
         scanSubscription?.dispose()
         devices.clear()
 
-        scanSubscription = rxBleClient.scanBleDevices(
-            com.polidea.rxandroidble3.scan.ScanSettings.Builder()
-                .setCallbackType(com.polidea.rxandroidble3.scan.ScanSettings.CALLBACK_TYPE_FIRST_MATCH)
-                .build()
-        ).subscribe(
-            { scanResult ->
-                val deviceName = scanResult.bleDevice.name
-                val deviceId = scanResult.bleDevice.macAddress
-                if (!deviceName.isNullOrBlank() && !devices.containsKey(deviceId)) {
-                    devices[deviceId] = deviceName
-                    devicesFound.add(mapOf("id" to deviceId, "name" to deviceName))
-                    onDeviceFound(devicesFound)
+        try {
+            scanSubscription = rxBleClient.scanBleDevices(
+                com.polidea.rxandroidble3.scan.ScanSettings.Builder()
+                    .setCallbackType(com.polidea.rxandroidble3.scan.ScanSettings.CALLBACK_TYPE_FIRST_MATCH)
+                    .build()
+            ).subscribe(
+                { scanResult ->
+                    val deviceName = scanResult.bleDevice.name
+                    val deviceId = scanResult.bleDevice.macAddress
+                    if (!deviceName.isNullOrBlank() && !devices.containsKey(deviceId)) {
+                        devices[deviceId] = deviceName
+                        devicesFound.add(mapOf("id" to deviceId, "name" to deviceName))
+                        onDeviceFound(devicesFound)
+                    }
+                },
+                { throwable ->
+                    Log.d("BluetoothManager", "Device Error: ${throwable.message}")
+                    promise.reject(
+                        "BLUETOOTH_ERROR",
+                        "Error while scanning for devices: ${throwable.message}",
+                        throwable
+                    )
                 }
-            },
-            { throwable ->
-                Log.d("BluetoothManager", "Device Error: ${throwable.message}")
-            }
-        )
+            )
+
+            promise.resolve(true)
+
+        } catch (e: Exception) {
+            Log.d("BluetoothManager", "Device Error: ${e.message}")
+            promise.reject(
+                "BLUETOOTH_ERROR",
+                "Error while scanning for devices: ${e.message}",
+                e
+            )
+        }
     }
 
-    fun connectToDevice(deviceId: String) {
+    fun suspendScanning(promise: Promise) {
+        try {
+            if (scanSubscription != null && !scanSubscription!!.isDisposed) {
+                scanSubscription!!.dispose() // Dispose of the current scan
+                scanSubscription = null
+                devices.clear() // Optionally clear discovered devices
+                Log.d("BluetoothManager", "Scanning has been suspended successfully.")
+                promise.resolve(true)
+            } else {
+                Log.d("BluetoothManager", "No active scan to suspend.")
+                promise.resolve(false)
+            }
+        } catch (e: Exception) {
+            Log.e("BluetoothManager", "Error while suspending scan: ${e.message}")
+            promise.reject(
+                "SCAN_SUSPEND_ERROR",
+                "Failed to suspend scanning: ${e.message}",
+                e
+            )
+        }
+    }
+
+    fun connectToDevice(deviceId: String, promise: Promise) {
         device = rxBleClient.getBleDevice(deviceId)
 
         Log.d("BluetoothManager", "Device State: ${device?.connectionState}")
@@ -101,16 +154,22 @@ class BluetoothManager(private val context: Context) {
         val disposable = device?.establishConnection(false)?.subscribe(
             { rxBleConnection ->
                 discoverServices(rxBleConnection)
+                promise.resolve(true)
             },
             { throwable ->
                 Log.e("BluetoothManager", "Connection error: ${throwable.message}")
+                promise.reject(
+                    "BLUETOOTH_ERROR",
+                    "Error while connecting to device: ${throwable.message}",
+                    throwable
+                )
             }
         )
 
         if (disposable != null) compositeDisposable.add(disposable)
     }
 
-    fun disconnect() {
+    fun disconnect(promise: Promise) {
         if (connection == null) {
             Log.d("BluetoothManager", "No active connection to disconnect.")
             return
@@ -122,14 +181,24 @@ class BluetoothManager(private val context: Context) {
             connection = null
             device = null
             Log.d("BluetoothManager", "Disconnected successfully.")
+            promise.resolve(true)
         } catch (e: Exception) {
             Log.e("BluetoothManager", "Error while disconnecting: ${e.message}")
+            promise.reject(
+                "BLUETOOTH_ERROR",
+                "Error while disconnecting: ${e.message}",
+                e
+            )
         }
     }
 
-    fun printWithDevice(lines: List<ByteArray>) {
+    fun printWithDevice(lines: List<ByteArray>, promise: Promise) {
         if (connection == null) {
-            return
+            return promise.reject(
+                "BLUETOOTH_ERROR",
+                "No active connection to print with.",
+                null
+            )
         }
 
         Log.d("BluetoothManager", "Device State: ${device?.connectionState}")
@@ -137,6 +206,8 @@ class BluetoothManager(private val context: Context) {
         for ( line in lines){
             sendPrintData(line)
         }
+
+        promise.resolve(true)
     }
 
     fun getAllowedMtu(): Int {
