@@ -18,92 +18,113 @@ public class ThermalPrintModule: Module {
 
     private var bluetoothManager: BluetoothManager? = nil
     
-  public func definition() -> ModuleDefinition {
-    Name("ThermalPrint")
-
-    Constants([
-      "PI": Double.pi
-    ])
-      
-      OnCreate {
-          bluetoothManager = BluetoothManager()
-      }
-
-    Events("onChange")
-      
-    Events("onGenerateBytecode")
-
-    Function("hello") {
-      return "Hello world! 👋"
+    public func definition() -> ModuleDefinition {
+        
+        Name("ThermalPrint")
+        
+        Events("onGenerateBytecode")
+        
+        AsyncFunction("generateBytecodeAsync") { (base64String: String, printerWidth: Int, mtuSize: Int, promise: Promise) in
+            
+            let bitmapData = self.prepareImageForThermalPrinter(
+                base64ImageString:base64String,
+                printerWidth:printerWidth,
+                mtuSize:mtuSize
+            )
+            
+            promise.resolve(bitmapData)
+        }
+        
+        AsyncFunction("generateBytecodeBase64Async") { (base64String: String, printerWidth: Int, mtuSize: Int, promise: Promise) in
+            
+            let bitmapData = self.prepareImageForThermalPrinter(
+                base64ImageString:base64String,
+                printerWidth:printerWidth,
+                mtuSize:mtuSize
+            )
+            
+            let base64String = prepareImageForBase64ThermalPrinter(lines: bitmapData)
+            
+            promise.resolve(base64String)
+        }
+        
+        
+        /// NEW BLUETOOTH FUNCTIONS
+        
+        Events("newDevicesFound")
+        
+        AsyncFunction("initializeBluetooth") {
+            if bluetoothManager == nil {
+                bluetoothManager = BluetoothManager()
+            }
+        }
+        
+        AsyncFunction("scanForBlueToothDevices") {(promise: Promise) in
+            do {
+                let scanning = try scanForDevices{ devices in
+                    self.sendEvent("newDevicesFound", [
+                        "devices": devices
+                    ])
+                }
+                
+                promise.resolve(scanning)
+            } catch {
+                promise.reject(error)
+            }
+        }
+        
+        AsyncFunction("suspendScanForBlueToothDevices") {(promise: Promise) in
+            Task{
+                let stopScanning = bluetoothManager?.stopScanning();
+                promise.resolve(stopScanning)
+            }
+        }
+        
+        AsyncFunction("connectToBlueToothDevice") { (deviceId: String, promise: Promise) in
+            print("Connecting to \(deviceId)")
+            Task {
+                do {
+                    let connection = try await self.connectToDevice(deviceId: deviceId)
+                    promise.resolve(connection)
+                } catch {
+                    promise.reject(Exception(name: "Device Not Connected", description: "Could not connect to device") as Error)
+                }
+            }
+        }
+        
+        AsyncFunction("disconnectFromBlueToothDevice"){(promise: Promise) in
+            Task{
+                do {
+                    promise.resolve(try await bluetoothManager?.disconnect())
+                } catch {
+                    promise.reject(Exception(name: "Device Not Disconnected", description: "Could not disconnect device") as Error)
+                }
+            }
+        }
+        
+        AsyncFunction("sendToBluetoothThermalPrinterAsync") { (base64String: String, printerWidth: Int, promise: Promise) in
+            
+            let mtuSize = bluetoothManager?.getAllowedMtu() ?? 20
+            
+            let bitmapData = self.prepareImageForThermalPrinter(
+                base64ImageString: base64String,
+                printerWidth: printerWidth,
+                mtuSize: mtuSize
+            )
+            
+            print("Printing With Length \(bitmapData.count) bytes and \(mtuSize)")
+            
+            Task {
+                let printed = await printWithDevice(lines: bitmapData)
+                
+                if printed {
+                    promise.resolve(true)
+                } else {
+                    promise.reject(Exception(name: "Printing Error", description: "Could not print") as Error)
+                }
+            }
+        }
     }
-
-    AsyncFunction("setValueAsync") { (value: String) in
-      self.sendEvent("onChange", [
-        "value": value
-      ])
-    }
-      
-      AsyncFunction("generateBytecodeAsync") { (base64String: String, printerWidth: Int, mtuSize: Int) -> [[UInt8]] in
-          
-          let bitmapData = self.prepareImageForThermalPrinter(
-              base64ImageString:base64String,
-              printerWidth:printerWidth,
-              mtuSize:mtuSize
-          )
-
-          return bitmapData
-      }
-      
-      AsyncFunction("generateBytecodeBase64Async") { (base64String: String, printerWidth: Int, mtuSize: Int) -> [String] in
-          
-          let bitmapData = self.prepareImageForThermalPrinter(
-              base64ImageString:base64String,
-              printerWidth:printerWidth,
-              mtuSize:mtuSize
-          )
-          
-          let base64String = prepareImageForBase64ThermalPrinter(lines: bitmapData)
-
-          return base64String
-      }
-      
-      
-      /// NEW BLUETOOTH FUNCTIONS
-      
-      Events("newDeviceFound")
-      
-      AsyncFunction("scanForBlueToothDevices") {
-          scanForDevices{ devices in
-              self.sendEvent("newDeviceFound", [
-                "devices": devices
-              ])
-          }
-      }
-      
-      AsyncFunction("connectToBlueToothDevice") { (deviceId: String) in
-          connectToDevice(address: deviceId)
-      }
-      
-      AsyncFunction("disconnectFromBlueToothDevice") {
-          bluetoothManager?.disconnect()
-      }
-      
-      AsyncFunction("sendToBluetoothThermalPrinterAsync") { (base64String: String, printerWidth: Int) in
-          
-          let mtuSize = bluetoothManager?.getAllowedMtu() ?? 20
-          
-          let bitmapData = self.prepareImageForThermalPrinter(
-              base64ImageString: base64String,
-              printerWidth: printerWidth,
-              mtuSize: mtuSize
-          )
-          
-          print("Printing With Length \(bitmapData.count) bytes and \(mtuSize)")
-          
-          printWithDevice(lines: bitmapData)
-       
-      }
-  }
 
     func convertTo1BitMonochrome(bitmap: UIImage, maxWidth: Int) -> [UInt8] {
         guard let cgImage = bitmap.cgImage else { return [] }
@@ -227,59 +248,76 @@ public class ThermalPrintModule: Module {
         return chunkedData
     }
     
-    private func scanForDevices(onDeviceFound: @escaping ([[String: String]]) -> Void) {
-        guard let manager = bluetoothManager else {
-            print("BluetoothManager is not initialized")
-            return
+    private func scanForDevices(onDeviceFound: @escaping ([[String: String]]) -> Void) throws -> Bool {
+        guard bluetoothManager != nil else {
+            throw Exception(
+                name: "BluetoothManagerNotInitialized",
+                description: "BluetoothManager is not initialized"
+            )
         }
         
-        guard manager.isBluetoothSupported() else {
+        guard bluetoothManager!.isBluetoothSupported() else {
             print("Bluetooth is not supported on this device")
-            return
+            return false
         }
         
-        guard manager.isBluetoothEnabled() else {
+        guard bluetoothManager!.isBluetoothEnabled() else {
             print("Please enable Bluetooth")
-            return
+            return false
         }
         
         // Start scanning for devices
-        manager.startScanning { devices in
+        bluetoothManager!.startScanning { devices in
             onDeviceFound(devices)
         }
+        
+        return true
     }
     
-    private func connectToDevice(address: String) {
+    private func connectToDevice(deviceId: String) async throws -> Bool {
+
+        guard bluetoothManager != nil else {
+            throw Exception(
+                name: "BluetoothManagerNotInitialized",
+                description: "BluetoothManager is not initialized"
+            )
+        }
+        
+        guard bluetoothManager!.isBluetoothSupported() else {
+            print("Bluetooth is not supported on this device")
+            return false
+        }
+        
+        guard let uuid = UUID(uuidString: deviceId) else {
+            print("Invalid UUID string: \(deviceId)")
+            return false
+        }
+        
+        do {
+            return try await bluetoothManager!.connectToDevice(identifier: uuid)
+        } catch {
+            print("Failed to connect to device: \(error)")
+            return false // Connection failed
+        }
+    }
+    
+    private func printWithDevice(lines: [[UInt8]]) async -> Bool{
         guard let manager = bluetoothManager else {
             print("BluetoothManager is not initialized")
-            return
+            return false
         }
         
         guard manager.isBluetoothSupported() else {
             print("Bluetooth is not supported on this device")
-            return
+            return false
         }
         
-        guard let uuid = UUID(uuidString: address) else {
-            print("Invalid UUID string: \(address)")
-            return
+        do {
+            return try await manager.printWithDevice(data: lines)
+        } catch {
+            print("Failed to print: \(error)")
+            return false
         }
-        
-        manager.connectToDevice(identifier: uuid)
-    }
-    
-    private func printWithDevice(lines: [[UInt8]]){
-        guard let manager = bluetoothManager else {
-            print("BluetoothManager is not initialized")
-            return
-        }
-        
-        guard manager.isBluetoothSupported() else {
-            print("Bluetooth is not supported on this device")
-            return
-        }
-        
-        bluetoothManager?.printWithDevice(data: lines)
         
     }
 }

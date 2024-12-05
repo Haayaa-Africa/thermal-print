@@ -11,7 +11,6 @@ import ThermalPrintModule from "./ThermalPrintModule";
 import { EventSubscription } from "expo-modules-core/build/ts-declarations/EventEmitter";
 
 // Get the native constant value.
-export const PI = ThermalPrintModule.PI;
 
 export async function generateBytecodeAsync(
   value: string,
@@ -71,19 +70,27 @@ export { ChangeEventPayload };
 
 /// NEW BLUETOOTH FUNCTIONS
 
-export type DeviceFound = {
+export type Device = {
   id: string;
   name: string;
 };
 
 export type DeviceFoundEvent = {
-  devices: DeviceFound[];
+  devices: Device[];
 };
 
 export function bluetoothDevicesScannedListener(
-  listener: (event: DeviceFoundEvent[]) => void
+  listener: (event: DeviceFoundEvent) => void
 ): EventSubscription {
-  return ThermalPrintModule.addListener("newDeviceFound", listener);
+  return ThermalPrintModule.addListener("newDevicesFound", listener);
+}
+
+export async function initializeBluetooth(): Promise<void> {
+  return await ThermalPrintModule.initializeBluetooth();
+}
+
+export async function suspendScanForBlueToothDevices(): Promise<void> {
+  return await ThermalPrintModule.suspendScanForBlueToothDevices();
 }
 
 export async function scanForBlueToothDevices(): Promise<void> {

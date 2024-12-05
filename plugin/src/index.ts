@@ -9,7 +9,7 @@ const withBluetoothPermissions: ConfigPlugin = (config) => {
     config.modResults = {
       ...config.modResults,
       NSBluetoothAlwaysUsageDescription:
-        "App requires Bluetooth to connect and print thermal printers.",
+        "App requires Bluetooth to connect and print with thermal printers.",
     };
     return config;
   });
