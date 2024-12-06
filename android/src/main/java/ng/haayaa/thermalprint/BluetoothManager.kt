@@ -203,18 +203,45 @@ class BluetoothManager(private val context: Context) {
 
         Log.d("BluetoothManager", "Device State: ${device?.connectionState}")
 
-        for ( line in lines){
-            sendPrintData(line)
+        var successCount = 0
+        var hasFailure = false
+
+        // Process each line
+        for (line in lines) {
+            if (hasFailure) {
+                break // Stop processing further if a failure has already occurred
+            }
+
+            sendPrintData(line, {
+                successCount++
+            }, {
+                hasFailure = true
+            })
+            Thread.sleep(10) // Short delay to avoid overloading
         }
 
-        promise.resolve(true)
+        // Wait until all operations are complete or a failure occurs
+        while (successCount < lines.size && !hasFailure) {
+            Thread.sleep(50) // Polling interval to wait for completion
+        }
+
+        // Resolve or reject the promise based on the outcome
+        if (hasFailure) {
+            promise.reject(
+                "PRINT_ERROR",
+                "Failed to print a line.",
+                null
+            )
+        } else if (successCount == lines.size) {
+            promise.resolve(true)
+        }
     }
 
     fun getAllowedMtu(): Int {
         return connection?.mtu ?: 20
     }
 
-    private fun sendPrintData(byteArray: ByteArray) {
+    private fun sendPrintData(byteArray: ByteArray, onSuccess: () -> Unit, onFailure: () -> Unit) {
         if (connection === null) return;
 
         Log.d("BluetoothManager", "Printing with device with MTU ${connection?.mtu}")
@@ -224,11 +251,16 @@ class BluetoothManager(private val context: Context) {
             ?.setBytes(byteArray)
             ?.build()
             ?.subscribe(
-                { Log.d("BluetoothManager", "Data successfully sent using existing connection.") },
+                {
+                    Log.d("BluetoothManager", "Data successfully sent using existing connection.")
+                    onSuccess() // Notify success
+                },
                 { throwable ->
                     Log.e("BluetoothManager", "Error while printing: ${throwable.message}")
+                    onFailure() // Notify failure
                 }
             )
+
 
         if (disposable != null) compositeDisposable.add(disposable)
     }

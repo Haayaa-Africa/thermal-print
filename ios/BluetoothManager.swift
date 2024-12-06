@@ -7,6 +7,7 @@
 
 import CoreBluetooth
 import Foundation
+import ExpoModulesCore
 
 class BluetoothManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     private var centralManager: CBCentralManager!
@@ -38,88 +39,91 @@ class BluetoothManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
         return centralManager.state == .poweredOn
     }
     
-    func requestBluetoothPermissions() {
-        // Permissions are handled in the app's Info.plist for iOS.
+    func requestBluetoothPermissions() -> Bool {
+        if #available(iOS 13.0, *) {
+            return CBManager.authorization == .allowedAlways
+        } else {
+            return CBPeripheralManager.authorizationStatus() == .authorized
+        }
     }
     
-    func startScanning(onDeviceFound: @escaping ([Dictionary<String, String>]) -> Void) {
+    func startScanning(onDeviceFound: @escaping ([Dictionary<String, String>]) -> Void, promise: Promise) {
         self.onDeviceFound = onDeviceFound
         discoveredPeripherals.removeAll()
         centralManager.scanForPeripherals(withServices: nil, options: nil)
+        promise.resolve(true)
     }
     
-    func stopScanning() -> Bool {
+    func stopScanning(promise: Promise) {
         guard centralManager.isScanning else {
             print("Bluetooth scanning is not currently active.")
-            return true
+            promise.resolve(true)
+            return
         }
         
         centralManager.stopScan()
-        return true
+        promise.resolve(true)
+        return
     }
     
-    func connectToDevice(identifier: UUID) async throws -> Bool {
+    func connectToDevice(identifier: UUID, promise: Promise) {
 
         guard let peripheral = discoveredPeripherals.first(where: { $0.identifier == identifier }) else {
-            throw NSError(domain: "BluetoothManager", code: 404, userInfo: [NSLocalizedDescriptionKey: "Device not found"])
+            promise.reject(
+                "BluetoothDeviceNotFound",
+                "Could not find peripheral with identifier \(identifier)"
+            )
+            
+            return
+        }
+        
+        if connectedPeripheral?.identifier == identifier {
+            promise.resolve(true)
+            return
         }
         
         print("Connecting to \(peripheral.name ?? "Unknown")...")
 
-        return try await withCheckedThrowingContinuation { continuation in
-            // Keep track of the peripheral for the continuation
-            self.onConnectSuccess = { (connectedPeripheral: CBPeripheral) in
-                if connectedPeripheral.identifier == identifier {
-                    continuation.resume(returning: true)
-                }
+        self.onConnectSuccess = { (connectedPeripheral: CBPeripheral) in
+            if connectedPeripheral.identifier == identifier {
+                promise.resolve(true)
             }
-
-            self.onConnectFailure = { error in
-                continuation.resume(throwing: error)
-            }
-
-            centralManager.connect(peripheral, options: nil)
         }
+
+        self.onConnectFailure = { error in
+            promise.reject(
+                "BluetoothDeviceConnectionFailed",
+                "Could not connect to peripheral \(peripheral.name ?? "Unknown"). \(error)"
+            )
+        }
+
+        centralManager.connect(peripheral, options: [CBConnectPeripheralOptionNotifyOnDisconnectionKey: true])
     }
     
     var onDisconnectSuccess: (() -> Void)?
     var onDisconnectFailure: ((Error) -> Void)?
     
-    func disconnect() async throws -> Bool {
+    func disconnect(promise: Promise) {
         guard let peripheral = connectedPeripheral else {
-            print("No device is currently connected to disconnect.")
-            return true;
+            promise.resolve(true)
+            return;
         }
         
-        return try await withCheckedThrowingContinuation { continuation in
-            
-            // Handle disconnection events
-            self.onDisconnectSuccess = {
-                continuation.resume(returning: true)
-            }
-            
-            self.onDisconnectFailure = { error in
-                continuation.resume(throwing: error)
-            }
-            
-            centralManager.cancelPeripheralConnection(peripheral)
-        }
-    }
-    
-    func printWithDevice(data: [[UInt8]]) async throws -> Bool {
-        guard let peripheral = connectedPeripheral else {
-            print("No connected device")
-            throw NSError(domain: "BluetoothManager", code: 404, userInfo: [NSLocalizedDescriptionKey: "No connected device"])
+        self.onDisconnectSuccess = {
+            promise.resolve(true)
+            return;
         }
         
-        print("Print count: \(data.count)")
-        
-        for chunk in data {
-            try await Task.sleep(nanoseconds: 10_000_000)
-            try await sendPrintDataAsync(peripheral: peripheral, data: Data(chunk))
+        self.onDisconnectFailure = { error in
+            promise.reject(
+                "BluetoothDeviceDisconnectionFailed",
+                "Failed to disconnect from device"
+            )
+            return;
         }
         
-        return true;
+        centralManager.cancelPeripheralConnection(peripheral)
+
     }
     
     func getAllowedMtu() -> Int {
@@ -133,28 +137,76 @@ class BluetoothManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
         return mtu
     }
     
-    private func sendPrintData(peripheral: CBPeripheral, data: Data) {
-        guard let characteristic = writableCharacteristics.first else {
-            print("No writable characteristic available")
+    func printWithDevice(data: [[UInt8]], promise: Promise) {
+        guard let peripheral = connectedPeripheral else {
+            promise.reject("BluetoothDeviceDisconnected", "Device disconnected")
             return
         }
-        
-        peripheral.writeValue(data, for: characteristic, type: .withoutResponse)
-    }
-    
-    private func sendPrintDataAsync(peripheral: CBPeripheral, data: Data) async throws {
-        return try await withCheckedThrowingContinuation { continuation in
-            guard let characteristic = writableCharacteristics.first else {
-                continuation.resume(throwing: NSError(domain: "BluetoothManager", code: 404, userInfo: [NSLocalizedDescriptionKey: "No writable characteristic available"]))
-                return
+
+        print("Print count: \(data.count)")
+
+        var successCount = 0
+        var hasFailure = false
+        let totalChunks = data.count
+
+        // Function to check completion status
+        func checkCompletion() {
+            if hasFailure {
+                promise.reject("PRINT_ERROR", "Failed to print a line.")
+            } else if successCount == totalChunks {
+                promise.resolve(true)
             }
-            
-            peripheral.writeValue(data, for: characteristic, type: .withoutResponse)
-            
-            // You could add additional checks for delegate-based confirmation if necessary
-            continuation.resume()
+        }
+
+        // Process each chunk
+        for chunk in data {
+            if hasFailure {
+                break // Stop processing further if a failure has already occurred
+            }
+
+            let chunkData = Data(chunk)
+            sendPrintData(peripheral: peripheral, data: chunkData, onSuccess: {
+                successCount += 1
+                print("Chunk printed successfully (\(successCount)/\(totalChunks))")
+                checkCompletion()
+            }, onFailure: { error in
+                print("Failed to print chunk: \(error.localizedDescription)")
+                hasFailure = true
+                checkCompletion()
+            })
+
+            // Short delay to avoid overloading
+            Thread.sleep(forTimeInterval: 0.01)
+        }
+
+        // Polling loop to ensure all operations complete before promise resolution
+        let startTime = Date()
+        let timeout: TimeInterval = 10 // 10 seconds timeout
+        while successCount < totalChunks && !hasFailure {
+            Thread.sleep(forTimeInterval: 0.05) // Polling interval
+            if Date().timeIntervalSince(startTime) > timeout {
+                promise.reject("PRINT_TIMEOUT", "Printing timed out after \(timeout) seconds.")
+                break
+            }
         }
     }
+    
+    private func sendPrintData(peripheral: CBPeripheral, data: Data, onSuccess: @escaping () -> Void, onFailure: @escaping (Error) -> Void) {
+        guard let characteristic = writableCharacteristics.first else {
+            print("No writable characteristic available")
+            onFailure(NSError(domain: "Bluetooth", code: 1, userInfo: [NSLocalizedDescriptionKey: "No writable characteristic available"]))
+            return
+        }
+
+        peripheral.writeValue(data, for: characteristic, type: .withoutResponse)
+
+        // Simulate success for now; actual success/failure is reported via didWriteValueFor delegate
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.1) {
+            // Call onSuccess or onFailure here based on actual write status
+            onSuccess() // Simulated success
+        }
+    }
+    
     
     // MARK: - CBCentralManagerDelegate
     
