@@ -169,7 +169,7 @@ class BluetoothManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
             case .success:
                 // Successfully printed this line, move to the next
                 self.sendLinesRecursively(lines: lines, currentIndex: currentIndex + 1, promise: promise)
-            case .failure(let error):
+            case .failure(_):
                 // Failed, reject the promise
                 promise.reject(
                    "PRINT_ERROR",
@@ -189,16 +189,21 @@ class BluetoothManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
         
         guard let characteristic = writableCharacteristics.first else {
             completion(.failure(NSError(domain: "Bluetooth", code: 1, userInfo: [NSLocalizedDescriptionKey: "No writable characteristic available"])))
-            
             return
         }
-
-        pendingWriteCompletions[characteristic.uuid] = completion
-
-        connection.writeValue(byteArray, for: characteristic, type: .withResponse)
+        
+        // Use .withoutResponse here:
+        connection.writeValue(byteArray, for: characteristic, type: .withoutResponse)
+        
+        // Since we won't get a response callback for .withoutResponse,
+        // we may need to call completion(.success(())) manually,
+        // or rely on `peripheral(_:didWriteValueFor:error:)` if the peripheral still calls it.
+        //
+        // If the peripheral does not provide write confirmations when using `.withoutResponse`,
+        // you’ll have to call `completion(.success(()))` here directly after writeValue:
+        
+        completion(.success(()))
     }
-    
-    
     
     
     // Then in your CBPeripheralDelegate:
