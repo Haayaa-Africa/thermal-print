@@ -132,81 +132,100 @@ class BluetoothManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
             return 20
         }
         
-        let mtu = peripheral.maximumWriteValueLength(for: .withoutResponse)
+        let mtu = peripheral.maximumWriteValueLength(for: .withResponse)
         
         return mtu
     }
     
-    func printWithDevice(data: [[UInt8]], promise: Promise) {
+    func printWithDevice(lines: [Data], promise: Promise) {
+        // Check if we have a valid connection
         guard let peripheral = connectedPeripheral else {
-            promise.reject("BluetoothDeviceDisconnected", "Device disconnected")
+            promise.reject(
+                "BLUETOOTH_ERROR",
+                "No active connection to print with."
+            )
             return
         }
 
-        print("Print count: \(data.count)")
+        print("Device State: \(peripheral.identifier)") // Logging equivalent
 
-        var successCount = 0
-        var hasFailure = false
-        let totalChunks = data.count
+        // Process lines on a background thread
+        DispatchQueue.global(qos: .background).async {
+            self.sendLinesRecursively(lines: lines, currentIndex: 0, promise: promise)
+        }
+    }
 
-        // Function to check completion status
-        func checkCompletion() {
-            if hasFailure {
-                promise.reject("PRINT_ERROR", "Failed to print a line.")
-            } else if successCount == totalChunks {
-                promise.resolve(true)
-            }
+    private func sendLinesRecursively(lines: [Data], currentIndex: Int, promise: Promise) {
+        // If we've printed all lines successfully
+        if currentIndex >= lines.count {
+            promise.resolve(true)
+            return
         }
 
-        // Process each chunk
-        for chunk in data {
-            if hasFailure {
-                break // Stop processing further if a failure has already occurred
-            }
+        let line = lines[currentIndex]
 
-            let chunkData = Data(chunk)
-            sendPrintData(peripheral: peripheral, data: chunkData, onSuccess: {
-                successCount += 1
-                print("Chunk printed successfully (\(successCount)/\(totalChunks))")
-                checkCompletion()
-            }, onFailure: { error in
-                print("Failed to print chunk: \(error.localizedDescription)")
-                hasFailure = true
-                checkCompletion()
-            })
-
-            // Short delay to avoid overloading
-            Thread.sleep(forTimeInterval: 0.01)
-        }
-
-        // Polling loop to ensure all operations complete before promise resolution
-        let startTime = Date()
-        let timeout: TimeInterval = 10 // 10 seconds timeout
-        while successCount < totalChunks && !hasFailure {
-            Thread.sleep(forTimeInterval: 0.05) // Polling interval
-            if Date().timeIntervalSince(startTime) > timeout {
-                promise.reject("PRINT_TIMEOUT", "Printing timed out after \(timeout) seconds.")
-                break
+        doSendPrintData(byteArray: line) { result in
+            switch result {
+            case .success:
+                // Successfully printed this line, move to the next
+                self.sendLinesRecursively(lines: lines, currentIndex: currentIndex + 1, promise: promise)
+            case .failure(_):
+                // Failed, reject the promise
+                promise.reject(
+                   "PRINT_ERROR",
+                   "Failed to print one or more lines."
+                )
             }
         }
     }
     
-    private func sendPrintData(peripheral: CBPeripheral, data: Data, onSuccess: @escaping () -> Void, onFailure: @escaping (Error) -> Void) {
+    private var pendingWriteCompletions: [CBUUID: (Result<Void, Error>) -> Void] = [:]
+
+    private func doSendPrintData(byteArray: Data, completion: @escaping (Result<Void, Error>) -> Void) {
+        guard let connection = connectedPeripheral else {
+            completion(.failure(NSError(domain: "NoConnection", code: -1, userInfo: [NSLocalizedDescriptionKey: "No connection available"])))
+            return
+        }
+        
         guard let characteristic = writableCharacteristics.first else {
-            print("No writable characteristic available")
-            onFailure(NSError(domain: "Bluetooth", code: 1, userInfo: [NSLocalizedDescriptionKey: "No writable characteristic available"]))
+            completion(.failure(NSError(domain: "Bluetooth", code: 1, userInfo: [NSLocalizedDescriptionKey: "No writable characteristic available"])))
             return
         }
-
-        peripheral.writeValue(data, for: characteristic, type: .withoutResponse)
-
-        // Simulate success for now; actual success/failure is reported via didWriteValueFor delegate
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.1) {
-            // Call onSuccess or onFailure here based on actual write status
-            onSuccess() // Simulated success
-        }
+        
+        // Use .withoutResponse here:
+        connection.writeValue(byteArray, for: characteristic, type: .withoutResponse)
+        
+        // Since we won't get a response callback for .withoutResponse,
+        // we may need to call completion(.success(())) manually,
+        // or rely on `peripheral(_:didWriteValueFor:error:)` if the peripheral still calls it.
+        //
+        // If the peripheral does not provide write confirmations when using `.withoutResponse`,
+        // you’ll have to call `completion(.success(()))` here directly after writeValue:
+        
+        completion(.success(()))
     }
     
+    
+    // Then in your CBPeripheralDelegate:
+    func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
+        if let completion = pendingWriteCompletions[characteristic.uuid] {
+            pendingWriteCompletions.removeValue(forKey: characteristic.uuid)
+            if let error = error {
+                print("Error while printing: \(error.localizedDescription)")
+                completion(.failure(error))
+            } else {
+                print("Data successfully sent.")
+                completion(.success(()))
+            }
+        } else {
+            // If there's no completion for this characteristic, just log or ignore
+            if let error = error {
+                print("Error writing value: \(error.localizedDescription)")
+            } else {
+                print("Data written successfully to characteristic \(characteristic.uuid)")
+            }
+        }
+    }
     
     // MARK: - CBCentralManagerDelegate
     
@@ -288,14 +307,6 @@ class BluetoothManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
             if knownWritableUUIDs.contains(characteristic.uuid) {
                 writableCharacteristics.append(characteristic)
             }
-        }
-    }
-    
-    func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
-        if let error = error {
-            print("Error writing value: \(error.localizedDescription)")
-        } else {
-            print("Data written successfully to characteristic \(characteristic.uuid)")
         }
     }
 }

@@ -286,7 +286,7 @@ public class ThermalPrintModule: Module {
             return
         }
         
-        manager.printWithDevice(data: lines, promise: promise)
+        manager.printWithDevice(lines: lines.map { Data($0) }, promise: promise)
         
     }
 }
