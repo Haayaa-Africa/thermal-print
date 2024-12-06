@@ -217,28 +217,25 @@ class BluetoothManager(private val context: Context) {
         Log.d("BluetoothManager", "Device State: ${device?.connectionState}")
 
         CoroutineScope(Dispatchers.IO).launch {
-            val results = lines.map { line ->
-                async {
-                    try {
-                        sendPrintData(line) // Called inside a coroutine
-                        true // Success
-                    } catch (e: Exception) {
-                        Log.e("BluetoothManager", "Failed to send data: ${e.message}")
-                        false // Failure
-                    }
+            var success = true
+            for (line in lines) {
+                try {
+                    sendPrintData(line) // Wait for each line to complete before sending the next
+                } catch (e: Exception) {
+                    success = false
+                    Log.e("BluetoothManager", "Failed to send data: ${e.message}")
+                    break // Stop processing further lines on failure
                 }
             }
 
-            val outcomes = results.awaitAll()
-
-            if (outcomes.any { !it }) {
+            if (success) {
+                promise.resolve(true)
+            } else {
                 promise.reject(
                     "PRINT_ERROR",
                     "Failed to print one or more lines.",
                     null
                 )
-            } else {
-                promise.resolve(true)
             }
         }
     }
