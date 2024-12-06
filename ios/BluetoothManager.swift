@@ -137,93 +137,71 @@ class BluetoothManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
         return mtu
     }
     
+    private var currentChunkIndex = 0
+    private var dataChunks: [Data] = []
+    private var currentPromise: Promise?
+    private var isWriting = false
+    
+    private func chunks(from data: Data, chunkSize: Int) -> [Data] {
+        var chunks: [Data] = []
+        var start = 0
+        while start < data.count {
+            let end = min(start + chunkSize, data.count)
+            chunks.append(data.subdata(in: start..<end))
+            start += chunkSize
+        }
+        return chunks
+    }
+
     func printWithDevice(lines: [Data], promise: Promise) {
-        // Check if we have a valid connection
-        guard let peripheral = connectedPeripheral else {
-            promise.reject(
-                "BLUETOOTH_ERROR",
-                "No active connection to print with."
-            )
+        guard !isWriting else {
+            promise.reject("BLUETOOTH_ERROR", "Another write operation is in progress.")
+            return
+        }
+        isWriting = true
+        currentChunkIndex = 0
+        
+        guard let peripheral = connectedPeripheral,
+              let characteristic = writableCharacteristics.first else {
+            promise.reject("BLUETOOTH_ERROR", "No active connection or no writable characteristic found.")
             return
         }
 
-        print("Device State: \(peripheral.identifier)") // Logging equivalent
+        let maxWriteLength = peripheral.maximumWriteValueLength(for: .withResponse)
+        
+        print("Printing with max write length \(maxWriteLength).")
+        dataChunks = lines
+        currentPromise = promise
 
-        // Process lines on a background thread
-        DispatchQueue.global(qos: .background).async {
-            self.sendLinesRecursively(lines: lines, currentIndex: 0, promise: promise)
-        }
+        // Start writing the first chunk
+        writeNextChunk(peripheral: peripheral, characteristic: characteristic)
     }
 
-    private func sendLinesRecursively(lines: [Data], currentIndex: Int, promise: Promise) {
-        // If we've printed all lines successfully
-        if currentIndex >= lines.count {
-            promise.resolve(true)
+    private func writeNextChunk(peripheral: CBPeripheral, characteristic: CBCharacteristic) {
+        guard currentChunkIndex < dataChunks.count else {
+            // All chunks written
+            print("All data successfully sent.")
+            currentPromise?.resolve(true)
+            isWriting = false
+            dataChunks.removeAll()
+            currentPromise = nil
             return
         }
 
-        let line = lines[currentIndex]
-
-        doSendPrintData(byteArray: line) { result in
-            switch result {
-            case .success:
-                // Successfully printed this line, move to the next
-                self.sendLinesRecursively(lines: lines, currentIndex: currentIndex + 1, promise: promise)
-            case .failure(_):
-                // Failed, reject the promise
-                promise.reject(
-                   "PRINT_ERROR",
-                   "Failed to print one or more lines."
-                )
-            }
-        }
+        let chunk = dataChunks[currentChunkIndex]
+        peripheral.writeValue(chunk, for: characteristic, type: .withResponse)
+        // The `didWriteValueFor` callback will be triggered upon completion or error
     }
     
-    private var pendingWriteCompletions: [CBUUID: (Result<Void, Error>) -> Void] = [:]
-
-    private func doSendPrintData(byteArray: Data, completion: @escaping (Result<Void, Error>) -> Void) {
-        guard let connection = connectedPeripheral else {
-            completion(.failure(NSError(domain: "NoConnection", code: -1, userInfo: [NSLocalizedDescriptionKey: "No connection available"])))
-            return
-        }
-        
-        guard let characteristic = writableCharacteristics.first else {
-            completion(.failure(NSError(domain: "Bluetooth", code: 1, userInfo: [NSLocalizedDescriptionKey: "No writable characteristic available"])))
-            return
-        }
-        
-        // Use .withoutResponse here:
-        connection.writeValue(byteArray, for: characteristic, type: .withoutResponse)
-        
-        // Since we won't get a response callback for .withoutResponse,
-        // we may need to call completion(.success(())) manually,
-        // or rely on `peripheral(_:didWriteValueFor:error:)` if the peripheral still calls it.
-        //
-        // If the peripheral does not provide write confirmations when using `.withoutResponse`,
-        // you’ll have to call `completion(.success(()))` here directly after writeValue:
-        
-        completion(.success(()))
-    }
-    
-    
-    // Then in your CBPeripheralDelegate:
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
-        if let completion = pendingWriteCompletions[characteristic.uuid] {
-            pendingWriteCompletions.removeValue(forKey: characteristic.uuid)
-            if let error = error {
-                print("Error while printing: \(error.localizedDescription)")
-                completion(.failure(error))
-            } else {
-                print("Data successfully sent.")
-                completion(.success(()))
-            }
+        if let error = error {
+            print("Error while writing: \(error.localizedDescription)")
+            // If you had a stored promise, reject it here
+            currentPromise?.reject("BLUETOOTH_ERROR", error.localizedDescription)
         } else {
-            // If there's no completion for this characteristic, just log or ignore
-            if let error = error {
-                print("Error writing value: \(error.localizedDescription)")
-            } else {
-                print("Data written successfully to characteristic \(characteristic.uuid)")
-            }
+            // Move to next chunk
+            currentChunkIndex += 1
+            writeNextChunk(peripheral: peripheral, characteristic: characteristic)
         }
     }
     
