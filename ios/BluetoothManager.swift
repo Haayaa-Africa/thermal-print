@@ -161,8 +161,24 @@ class BluetoothManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
         isWriting = true
         currentChunkIndex = 0
         
-        guard let peripheral = connectedPeripheral,
-              let characteristic = writableCharacteristics.first else {
+        guard let peripheral = connectedPeripheral else {
+            promise.reject("BLUETOOTH_ERROR", "No active connection.")
+            return
+        }
+        
+//        let characteristic = writableCharacteristics.first else {
+//            promise.reject("BLUETOOTH_ERROR", "No active connection or no writable characteristic found.")
+//            return
+//        }
+        
+        print("Writable characteristics: \(writableCharacteristics.count) found.")
+        
+        let matchingCharacteristics = writableCharacteristics.filter { characteristic in
+            knownWritableUUIDs.contains(characteristic.uuid)
+        }
+
+        // Check if there are matching characteristics
+        guard let characteristic = matchingCharacteristics.first else {
             promise.reject("BLUETOOTH_ERROR", "No active connection or no writable characteristic found.")
             return
         }
@@ -231,10 +247,8 @@ class BluetoothManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
     }
     
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        connectedPeripheral = peripheral
         peripheral.delegate = self
         peripheral.discoverServices(nil)
-        onConnectSuccess?(peripheral)
     }
     
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
@@ -271,18 +285,21 @@ class BluetoothManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
         for service in services {
             peripheral.discoverCharacteristics(nil, for: service)
         }
+        
+        connectedPeripheral = peripheral
+        onConnectSuccess?(peripheral)
     }
     
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
         if let error = error {
-            print("Characteristic discovery error: \(error.localizedDescription)")
+            onConnectFailure?(error)
             return
         }
         
         guard let characteristics = service.characteristics else { return }
         
         for characteristic in characteristics {
-            if knownWritableUUIDs.contains(characteristic.uuid) {
+            if characteristic.properties.contains(.read) {
                 writableCharacteristics.append(characteristic)
             }
         }
