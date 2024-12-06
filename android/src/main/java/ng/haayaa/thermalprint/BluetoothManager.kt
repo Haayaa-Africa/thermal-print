@@ -17,7 +17,15 @@ import com.polidea.rxandroidble3.RxBleDevice
 import expo.modules.kotlin.Promise
 import io.reactivex.rxjava3.disposables.CompositeDisposable
 import io.reactivex.rxjava3.disposables.Disposable
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.launch
 import java.util.UUID
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+import kotlin.coroutines.suspendCoroutine
 
 class BluetoothManager(private val context: Context) {
     private val bluetoothAdapter: BluetoothAdapter? = BluetoothAdapter.getDefaultAdapter()
@@ -192,108 +200,100 @@ class BluetoothManager(private val context: Context) {
         }
     }
 
-    fun printWithDevice(lines: List<ByteArray>, promise: Promise) {
-        if (connection == null) {
-            return promise.reject(
-                "BLUETOOTH_ERROR",
-                "No active connection to print with.",
-                null
-            )
-        }
-
-        Log.d("BluetoothManager", "Device State: ${device?.connectionState}")
-
-        var successCount = 0
-        var hasFailure = false
-
-        // Process each line
-        for (line in lines) {
-            if (hasFailure) {
-                break // Stop processing further if a failure has already occurred
-            }
-
-            sendPrintData(line, {
-                successCount++
-            }, {
-                hasFailure = true
-            })
-            Thread.sleep(10) // Short delay to avoid overloading
-        }
-
-        // Wait until all operations are complete or a failure occurs
-        while (successCount < lines.size && !hasFailure) {
-            Thread.sleep(50) // Polling interval to wait for completion
-        }
-
-        // Resolve or reject the promise based on the outcome
-        if (hasFailure) {
-            promise.reject(
-                "PRINT_ERROR",
-                "Failed to print a line.",
-                null
-            )
-        } else if (successCount == lines.size) {
-            promise.resolve(true)
-        }
-    }
-
     fun getAllowedMtu(): Int {
         return connection?.mtu ?: 20
     }
 
-    private fun sendPrintData(byteArray: ByteArray, onSuccess: () -> Unit, onFailure: () -> Unit) {
-        if (connection === null) return;
+    fun printWithDevice(lines: List<ByteArray>, promise: Promise) {
+        if (connection == null) {
+            promise.reject(
+                "BLUETOOTH_ERROR",
+                "No active connection to print with.",
+                null
+            )
+            return
+        }
+
+        Log.d("BluetoothManager", "Device State: ${device?.connectionState}")
+
+        CoroutineScope(Dispatchers.IO).launch {
+            val results = lines.map { line ->
+                async {
+                    try {
+                        sendPrintData(line) // Called inside a coroutine
+                        true // Success
+                    } catch (e: Exception) {
+                        Log.e("BluetoothManager", "Failed to send data: ${e.message}")
+                        false // Failure
+                    }
+                }
+            }
+
+            val outcomes = results.awaitAll()
+
+            if (outcomes.any { !it }) {
+                promise.reject(
+                    "PRINT_ERROR",
+                    "Failed to print one or more lines.",
+                    null
+                )
+            } else {
+                promise.resolve(true)
+            }
+        }
+    }
+
+    private suspend fun sendPrintData(byteArray: ByteArray) {
+        if (connection == null) throw IllegalStateException("No connection available")
 
         Log.d("BluetoothManager", "Printing with device with MTU ${connection?.mtu}")
 
-        val disposable = connection?.createNewLongWriteBuilder()
-            ?.setCharacteristicUuid(knownWritableUUIDs.first())
-            ?.setBytes(byteArray)
-            ?.build()
-            ?.subscribe(
-                {
-                    Log.d("BluetoothManager", "Data successfully sent using existing connection.")
-                    onSuccess() // Notify success
-                },
-                { throwable ->
-                    Log.e("BluetoothManager", "Error while printing: ${throwable.message}")
-                    onFailure() // Notify failure
-                }
-            )
+        return suspendCoroutine { continuation ->
+            val disposable = connection?.createNewLongWriteBuilder()
+                ?.setCharacteristicUuid(knownWritableUUIDs.first())
+                ?.setBytes(byteArray)
+                ?.build()
+                ?.subscribe(
+                    {
+                        Log.d("BluetoothManager", "Data successfully sent.")
+                        continuation.resume(Unit) // Success
+                    },
+                    { throwable ->
+                        Log.e("BluetoothManager", "Error while printing: ${throwable.message}")
+                        continuation.resumeWithException(throwable) // Failure
+                    }
+                )
 
-
-        if (disposable != null) compositeDisposable.add(disposable)
+            if (disposable != null) compositeDisposable.add(disposable)
+        }
     }
 
     private fun discoverServices(rxBleConnection: RxBleConnection) {
         val mtuRequestDisposable = rxBleConnection.requestMtu(512)
             .subscribe({
-                Log.d("BluetoothManager", "MTU successfully set to $it")
+                val disposable = rxBleConnection.discoverServices()
+                    .subscribe(
+                        { services ->
+                            services.bluetoothGattServices.forEach { service ->
+                                service.characteristics.forEach { characteristic ->
+                                    if (isCharacteristicWritable(characteristic)) {
+                                        writeAbleUUIDS = writeAbleUUIDS + characteristic.uuid
+                                    }
+                                }
+                            }
+                        },
+                        { throwable ->
+                            Log.e("BluetoothManager", "Service discovery failed: ${throwable.message}")
+                        }
+                    )
+                compositeDisposable.add(disposable)
             }, { throwable ->
                 Log.e("BluetoothManager", "Error while setting MTU: ${throwable.message}")
             })
 
         compositeDisposable.add(mtuRequestDisposable)
 
-        val disposable = rxBleConnection.discoverServices()
-            .subscribe(
-                { services ->
-                    services.bluetoothGattServices.forEach { service ->
-                        service.characteristics.forEach { characteristic ->
-                            if (isCharacteristicWritable(characteristic)) {
-                                writeAbleUUIDS = writeAbleUUIDS + characteristic.uuid
-                            }
-                        }
-                    }
-                },
-                { throwable ->
-                    Log.e("BluetoothManager", "Service discovery failed: ${throwable.message}")
-                }
-            )
-
         connection = rxBleConnection;
-
-        compositeDisposable.add(disposable)
 
     }
 
