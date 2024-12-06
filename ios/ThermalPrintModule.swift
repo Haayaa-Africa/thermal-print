@@ -53,53 +53,34 @@ public class ThermalPrintModule: Module {
         
         Events("newDevicesFound")
         
-        AsyncFunction("initializeBluetooth") {
+        AsyncFunction("initializeBluetooth") {(promise: Promise) in
             if bluetoothManager == nil {
                 bluetoothManager = BluetoothManager()
             }
+            
+            let bluetoothInitialized = bluetoothManager?.requestBluetoothPermissions() ?? false
+            
+            promise.resolve(bluetoothInitialized)
         }
         
         AsyncFunction("scanForBlueToothDevices") {(promise: Promise) in
-            do {
-                let scanning = try scanForDevices{ devices in
-                    self.sendEvent("newDevicesFound", [
-                        "devices": devices
-                    ])
-                }
-                
-                promise.resolve(scanning)
-            } catch {
-                promise.reject(error)
-            }
+            scanForDevices(onDeviceFound: { devices in
+                self.sendEvent("newDevicesFound", [
+                    "devices": devices
+                ])
+            }, promise: promise)
         }
         
         AsyncFunction("suspendScanForBlueToothDevices") {(promise: Promise) in
-            Task{
-                let stopScanning = bluetoothManager?.stopScanning();
-                promise.resolve(stopScanning)
-            }
+            bluetoothManager?.stopScanning(promise: promise);
         }
         
         AsyncFunction("connectToBlueToothDevice") { (deviceId: String, promise: Promise) in
-            print("Connecting to \(deviceId)")
-            Task {
-                do {
-                    let connection = try await self.connectToDevice(deviceId: deviceId)
-                    promise.resolve(connection)
-                } catch {
-                    promise.reject(Exception(name: "Device Not Connected", description: "Could not connect to device") as Error)
-                }
-            }
+            connectToDevice(deviceId: deviceId, promise: promise)
         }
         
         AsyncFunction("disconnectFromBlueToothDevice"){(promise: Promise) in
-            Task{
-                do {
-                    promise.resolve(try await bluetoothManager?.disconnect())
-                } catch {
-                    promise.reject(Exception(name: "Device Not Disconnected", description: "Could not disconnect device") as Error)
-                }
-            }
+            bluetoothManager?.disconnect(promise: promise)
         }
         
         AsyncFunction("sendToBluetoothThermalPrinterAsync") { (base64String: String, printerWidth: Int, promise: Promise) in
@@ -114,15 +95,7 @@ public class ThermalPrintModule: Module {
             
             print("Printing With Length \(bitmapData.count) bytes and \(mtuSize)")
             
-            Task {
-                let printed = await printWithDevice(lines: bitmapData)
-                
-                if printed {
-                    promise.resolve(true)
-                } else {
-                    promise.reject(Exception(name: "Printing Error", description: "Could not print") as Error)
-                }
-            }
+            printWithDevice(lines: bitmapData, promise: promise)
         }
     }
 
@@ -248,76 +221,72 @@ public class ThermalPrintModule: Module {
         return chunkedData
     }
     
-    private func scanForDevices(onDeviceFound: @escaping ([[String: String]]) -> Void) throws -> Bool {
+    private func scanForDevices(onDeviceFound: @escaping ([[String: String]]) -> Void, promise: Promise) {
         guard bluetoothManager != nil else {
-            throw Exception(
-                name: "BluetoothManagerNotInitialized",
-                description: "BluetoothManager is not initialized"
+            promise.reject(
+                "BluetoothManagerNotInitialized",
+                "BluetoothManager not initialized"
             )
+            
+            return
         }
         
         guard bluetoothManager!.isBluetoothSupported() else {
-            print("Bluetooth is not supported on this device")
-            return false
+            promise.resolve(false)
+            return
         }
         
         guard bluetoothManager!.isBluetoothEnabled() else {
-            print("Please enable Bluetooth")
-            return false
+            promise.resolve(false)
+            return
         }
         
         // Start scanning for devices
-        bluetoothManager!.startScanning { devices in
+        bluetoothManager!.startScanning (onDeviceFound: { devices in
             onDeviceFound(devices)
-        }
+        }, promise: promise)
         
-        return true
     }
     
-    private func connectToDevice(deviceId: String) async throws -> Bool {
+    private func connectToDevice(deviceId: String, promise: Promise) {
 
         guard bluetoothManager != nil else {
-            throw Exception(
-                name: "BluetoothManagerNotInitialized",
-                description: "BluetoothManager is not initialized"
+            promise.reject(
+                "BluetoothManagerNotInitialized",
+                "BluetoothManager not initialized"
             )
+            return;
         }
         
         guard bluetoothManager!.isBluetoothSupported() else {
             print("Bluetooth is not supported on this device")
-            return false
+            promise.resolver(false)
+            return
         }
         
         guard let uuid = UUID(uuidString: deviceId) else {
-            print("Invalid UUID string: \(deviceId)")
-            return false
+            promise.resolver(false)
+            return
         }
         
-        do {
-            return try await bluetoothManager!.connectToDevice(identifier: uuid)
-        } catch {
-            print("Failed to connect to device: \(error)")
-            return false // Connection failed
-        }
+        bluetoothManager!.connectToDevice(identifier: uuid, promise: promise)
     }
     
-    private func printWithDevice(lines: [[UInt8]]) async -> Bool{
+    private func printWithDevice(lines: [[UInt8]], promise: Promise) {
         guard let manager = bluetoothManager else {
-            print("BluetoothManager is not initialized")
-            return false
+            promise.reject(
+                "BluetoothManagerNotInitialized",
+                "BluetoothManager not initialized"
+            )
+            return
         }
         
         guard manager.isBluetoothSupported() else {
-            print("Bluetooth is not supported on this device")
-            return false
+            promise.resolve(false)
+            return
         }
         
-        do {
-            return try await manager.printWithDevice(data: lines)
-        } catch {
-            print("Failed to print: \(error)")
-            return false
-        }
+        manager.printWithDevice(data: lines, promise: promise)
         
     }
 }

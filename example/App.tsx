@@ -81,7 +81,12 @@ export default function App() {
       return Alert.alert("Cannot Manipulate");
     }
 
-    ThermalPrint.sendToBluetoothThermalPrinterAsync(manipulate.base64, 384);
+    const response = await ThermalPrint.sendToBluetoothThermalPrinterAsync(
+      manipulate.base64,
+      384
+    );
+
+    console.log({ response });
   };
 
   const checkPermission = async () => {
@@ -188,16 +193,22 @@ export default function App() {
           if (ourDevice) {
             deviceConnected.current = ourDevice;
 
-            await ThermalPrint.connectToBlueToothDevice(ourDevice.id);
+            const connect = await ThermalPrint.connectToBlueToothDevice(
+              ourDevice.id
+            );
+
+            console.log({ connect });
           }
         }}
       />
 
       <Button
         title="Disconnect Bluetooth"
-        onPress={() => {
+        onPress={async () => {
           deviceConnected.current = undefined;
-          ThermalPrint.disconnectFromBlueToothDevice();
+          const disconnect = await ThermalPrint.disconnectFromBlueToothDevice();
+
+          console.log({ disconnect });
         }}
       />
       <Button
