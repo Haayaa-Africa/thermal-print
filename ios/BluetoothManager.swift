@@ -237,12 +237,21 @@ class BluetoothManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
         connectedPeripheral = peripheral
         peripheral.delegate = self
         peripheral.discoverServices(nil)
+        onConnectSuccess?(peripheral)
+    }
+    
+    func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
+        if(error != nil) {
+            onConnectFailure?(error!)
+        }
     }
     
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         if let error = error {
+            onDisconnectFailure?(error)
             print("Error while disconnecting from peripheral \(peripheral.name ?? "Unknown"): \(error.localizedDescription)")
         } else {
+            onDisconnectSuccess!()
             print("Successfully disconnected from peripheral \(peripheral.name ?? "Unknown")")
         }
         
