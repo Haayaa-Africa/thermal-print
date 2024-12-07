@@ -228,7 +228,7 @@ class BluetoothManager(private val context: Context) {
         val disposable = connection!!.createNewLongWriteBuilder()
             .setCharacteristicUuid(knownWritableUUIDs.first())
             .setBytes(byteArray)
-            .setMaxBatchSize(120)
+            .setMaxBatchSize(50)
             .build()
             .subscribe(
                 {
