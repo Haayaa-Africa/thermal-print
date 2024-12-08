@@ -39,7 +39,5 @@
     "react": "*",
     "react-native": "*"
   },
-  "dependencies": {
-    "@config-plugins/repo": "github:expo/config-plugins"
-  }
+  "dependencies": {}
 }
