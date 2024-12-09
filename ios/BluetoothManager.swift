@@ -273,6 +273,8 @@ class BluetoothManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
     }
     
     // MARK: - CBPeripheralDelegate
+
+    private var servicesCheckStatus: [CBUUID: Bool] = [:] // Tracks if characteristics of a service are checked
     
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         if let error = error {
@@ -280,14 +282,16 @@ class BluetoothManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
             return
         }
         
-        guard let services = peripheral.services else { return }
+        guard let services = peripheral.services else { return }   
+
+        for service in services {
+            servicesCheckStatus[service.uuid] = false
+        }
         
         for service in services {
             peripheral.discoverCharacteristics(nil, for: service)
         }
-        
-        connectedPeripheral = peripheral
-        onConnectSuccess?(peripheral)
+
     }
     
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
@@ -299,9 +303,22 @@ class BluetoothManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
         guard let characteristics = service.characteristics else { return }
         
         for characteristic in characteristics {
-            if characteristic.properties.contains(.read) {
+            if characteristic.properties.contains(.write) {
                 writableCharacteristics.append(characteristic)
             }
+        }
+        
+        // Mark the service as "checked"
+        servicesCheckStatus[service.uuid] = true
+        print(service.uuid )
+        print("Finished checking characteristics for service \(service.uuid).")
+        
+        // Check if all services have been checked
+        if servicesCheckStatus.values.allSatisfy({ $0 }) {
+            print("All services checked (\(writableCharacteristics.count)). Successfully connected to peripheral \(peripheral.name ?? "Unknown").")
+            
+            connectedPeripheral = peripheral
+            onConnectSuccess?(peripheral)
         }
     }
 }

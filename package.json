@@ -1,5 +1,5 @@
 {
-  "name": "thermal-print",
+  "name": "@haayaa/thermal-print",
   "version": "0.2.0",
   "description": "Thermal Printer Generator",
   "main": "build/index.js",
@@ -21,13 +21,13 @@
     "thermal-print",
     "ThermalPrint"
   ],
-  "repository": "https://github.com/haayaa/thermal-printer",
+  "repository": "https://github.com/haayaa/thermal-print",
   "bugs": {
-    "url": "https://github.com/haayaa/thermal-printer/issues"
+    "url": "https://github.com/haayaa/thermal-print/issues"
   },
   "author": "Adinnu Benedict <benidixt@gmail.com> (https://github.com/BenQoder)",
   "license": "MIT",
-  "homepage": "https://github.com/haayaa/thermal-printer#readme",
+  "homepage": "https://github.com/haayaa/thermal-print#readme",
   "devDependencies": {
     "@types/react": "^18.0.25",
     "expo-module-scripts": "^3.5.2",

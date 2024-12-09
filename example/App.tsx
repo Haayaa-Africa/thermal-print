@@ -10,7 +10,8 @@ import {
   Image,
 } from "react-native";
 import { captureRef } from "react-native-view-shot";
-import * as ThermalPrint from "thermal-print";
+
+import * as ThermalPrint from "..";
 
 const printerName = "58MINI_C0A3";
 
